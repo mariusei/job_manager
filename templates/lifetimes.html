@@ -1,0 +1,8 @@
+<!doctype html>
+<title>Lifetimes GAIA DR2 Processing pipeline job status</title>
+
+<ul>
+{% for item in lifetimes %}
+<li>Job stage: {{ item.jobstage }}; lifetime: {{ item.lifetime}} minutes </li>
+{% endfor %}
+</ul>

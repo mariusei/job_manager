@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="row">
+<div class="col-sm-11"><h2>Status of all jobs</h2></div>
+<div class="col-sm-1" style="text-align: right"><h2> {{ percent }}% </h2></div>
+</div>
+<progress value="{{ percent }}" max="100"></progress>
+<hr>
+
+<div class="row">
+<div class="col-sm  col-sm-offset-2"> Job ID </div>
+<div class="col-sm"> Stage </div>
+<div class="col-sm"> Save path </div>
+<div class="col-sm"> Date committed </div>
+</div>
+<hr>
+
+{% for item in jobs %}
+{% if item.flagged != 1 %}
+<div class="row">
+<div class="col-sm  col-sm-offset-2"> {{ item.jobid }} </div>
+<div class="col-sm"> {{ item.jobstage }} </div>
+{% if item.filename %}
+<div class="col-sm"> {{ item.filename.decode('utf8') }} </div>
+{% else %}
+<div class="col-sm">  </div>
+{% endif %}
+<div class="col-sm"> {{ item.datecommitted }} </div>
+</div>
+{% endif %}
+{% endfor %}
+
+<h2>Flagged jobs</h2>
+<hr>
+{% for item in jobs %}
+{% if item.flagged == 1 %}
+<div class="row">
+<div class="col-sm  col-sm-offset-2"> {{ item.jobid }} </div>
+<div class="col-sm"> {{ item.jobstage }} </div>
+{% if item.filename %}
+<div class="col-sm"> {{ item.filename.decode('utf8') }} </div>
+{% else %}
+<div class="col-sm">  </div>
+{% endif %}
+<div class="col-sm"> {{ item.datecommitted }} </div>
+</div>
+{% endif %}
+{% endfor %}
+
+{% endblock %}
