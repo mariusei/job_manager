@@ -1,10 +1,86 @@
 {% extends "base.html" %}
+{% block scripts %}
+<script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/socket.io/1.3.6/socket.io.min.js"></script>
+<script type="text/javascript" charset="utf-8">
+    var socket = io.connect('http://' + document.domain + ':' + location.port);
+    var njobs = {{ njobs }};
+    var ncomplete = {{ ncomplete }};
+    var nstages = {{ nstages }};
+    var percent = 0;
+
+    function set_percentage(){
+        percent_count = document.getElementById("progress_percent");
+        percent_bar = document.getElementById("progress_total");
+        if (ncomplete > 0) {
+            percent = parseInt(100.0 * ncomplete / njobs);
+        } else {
+            percent = 0;
+        }
+
+        percent_count.innerHTML = "<h2>" + percent + "%</h2>";
+        percent_bar.value = percent;
+    }
+
+    socket.on("reload", function(){
+        location.reload();
+    });
+
+    window.onload = function() {
+        set_percentage();
+    }
+
+    // Change job/div based on its id components
+    var working_node = document.getElementById("working_nodes");
+    var flagged_node = document.getElementById("flagged_nodes");
+    socket.on("job change", function(job){
+        //console.log("Received job change alert...");
+        //console.log(job);
+        //
+        var value;
+        var old_value;
+        for (var key in job){
+            //console.log(key);
+            if (!job[key]) {
+                value = '-';
+            } else {
+                value = job[key];
+            }
+            //console.log('value for key', key, 'is', value);
+            var entry = document.getElementById(key + " " + job["jobid"]);
+            if (key == "flagged") {
+                // Determine if this object must be moved
+                if (job[key] == 1 && entry.parentNode.id == "working_nodes") {
+                    // Move!
+                    flagged_node.appendChild(entry);
+                } else if (job[key] == 0 && entry.parentNode.id == "flagged_nodes") {
+                    working_node.appendChild(entry);
+                }
+            }
+            // Check if job completed? 
+            if (key == "jobstage") {
+                oldstage = entry.innerHTML;
+                if (job[key] > oldstage && job[key] == nstages) {
+                    ncomplete += 1;
+                    set_percentage();
+                }
+            }
+            if (entry && key != "flagged") {
+                entry.innerHTML = value;
+            } else {
+                console.log('Unkown element ID:', key);
+            }
+        }
+    });
+</script>
+
+{% endblock %}
+
 {% block body %}
 <div class="row">
 <div class="col-sm-11"><h2>Status of all jobs</h2></div>
-<div class="col-sm-1" style="text-align: right"><h2> {{ percent }}% </h2></div>
+<div id="progress_percent" class="col-sm-1" style="text-align: right"><h2> 0% </h2></div>
 </div>
-<progress value="{{ percent }}" max="100"></progress>
+<progress id="progress_total" value="0" max="100"></progress>
 <hr>
 
 <div class="row">
@@ -15,36 +91,56 @@
 </div>
 <hr>
 
+<div id="working_nodes">
 {% for item in jobs %}
 {% if item.flagged != 1 %}
-<div class="row">
-<div class="col-sm  col-sm-offset-2"> {{ item.jobid }} </div>
-<div class="col-sm"> {{ item.jobstage }} </div>
-{% if item.filename %}
-<div class="col-sm"> {{ item.filename.decode('utf8') }} </div>
-{% else %}
-<div class="col-sm">  </div>
-{% endif %}
-<div class="col-sm"> {{ item.datecommitted }} </div>
+<div id="flagged {{ item.jobid }}" class="row">
+    <div id="jobid {{ item.jobid }}" class="col-sm  col-sm-offset-2">
+        {{ item.jobid }}
+    </div>
+    <div id="jobstage {{ item.jobid }}" class="col-sm">
+        {{ item.jobstage }}
+    </div>
+    {% if item.filename %}
+    <div id="filename {{ item.jobid }}" class="col-sm">
+        {{ item.filename.decode('utf8') }}
+    </div>
+    {% else %}
+    <div id="filename {{ item.jobid }}" class="col-sm">  </div>
+    {% endif %}
+    <div id="datecommitted {{ item.jobid }}" class="col-sm">
+        {{ item.datecommitted }}
+    </div>
 </div>
 {% endif %}
 {% endfor %}
+</div>
 
 <h2>Flagged jobs</h2>
 <hr>
+<div id="flagged_nodes">
 {% for item in jobs %}
 {% if item.flagged == 1 %}
-<div class="row">
-<div class="col-sm  col-sm-offset-2"> {{ item.jobid }} </div>
-<div class="col-sm"> {{ item.jobstage }} </div>
-{% if item.filename %}
-<div class="col-sm"> {{ item.filename.decode('utf8') }} </div>
-{% else %}
-<div class="col-sm">  </div>
-{% endif %}
-<div class="col-sm"> {{ item.datecommitted }} </div>
+<div id="flagged {{ item.jobid }}" class="row">
+    <div id="jobid {{ item.jobid }}" class="col-sm  col-sm-offset-2">
+        {{ item.jobid }}
+    </div>
+    <div id="jobstage {{ item.jobid }}" class="col-sm">
+        {{ item.jobstage }}
+    </div>
+    {% if item.filename %}
+    <div id="filename {{ item.jobid }}" class="col-sm">
+        {{ item.filename.decode('utf8') }}
+    </div>
+    {% else %}
+    <div id="filename {{ item.jobid }}" class="col-sm">  </div>
+    {% endif %}
+    <div id="datecommitted {{ item.jobid }}" class="col-sm">
+        {{ item.datecommitted }}
+    </div>
 </div>
 {% endif %}
 {% endfor %}
+</div>
 
 {% endblock %}

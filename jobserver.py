@@ -1,15 +1,17 @@
 
 import json
 import os
+import datetime
+
 from flask import Flask, request, g
 from flask import render_template
-#from flask import abort, Response
-from werkzeug.exceptions import abort
+from flask import abort
 from flask_sqlalchemy import SQLAlchemy
-import datetime
+from flask_socketio import SocketIO
 
 
 app = Flask(__name__, instance_relative_config=True)
+socketio = SocketIO(app)
 
 # Job list SQLite database
 app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:///joblist.db"
@@ -17,6 +19,8 @@ app.config['SQLALCHEMY_BINDS'] = {
         'lifetimes': "sqlite:///lifetimes.db"
         }
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+dateformat = "%Y-%m-%d %H:%M:%S"
 
 db = SQLAlchemy(app)
 
@@ -34,7 +38,7 @@ class Engine(db.Model):
     # If the job has surpassed its allocated time:
     flagged = db.Column(db.Integer)
     # Filnames for last output
-    filename = db.Column(db.LargeBinary)
+    filename = db.Column(db.String)
 
 class Lifetime(db.Model):
     __bind_key__ = 'lifetimes'
@@ -94,8 +98,12 @@ def init_ix(stage_times=None):
                 db.session.commit()
         lts_q = Lifetime.query.all()
         lts_new = {i.jobstage: i.lifetime for i in lts_q}
+        # Reload web pages
+        bcast_reload()
         return json.dumps(lts_new).encode("utf8")
     else:
+        # Reload web pages
+        bcast_reload()
         return json.dumps(Lifetime.query.all()).encode("utf8")
 
 """
@@ -151,7 +159,7 @@ def update_job(jobid=None, jobstage=None):
         # that the worker for the next step can use for its
         # analysis
         req_fname = request.get_json()
-        filename = bytes(req_fname['filename'].encode("utf8"))
+        filename = req_fname['filename'].encode("utf8")
     else:
         # Not neccessarily so that a job updates a filename
         filename = None
@@ -162,10 +170,17 @@ def update_job(jobid=None, jobstage=None):
         job.jobstage = jobstage
         job.filename = filename or job.filename
         job.datecommitted=datetime.datetime.now()
-        job.flag = 0
+        job.flagged = 0
 
         # Update entry
         db.session.commit()
+        
+        # Broadcast changes to webpage conncetions
+        bcast_change_job(job.jobid,
+                {'jobstage': job.jobstage,
+                 'filename': job.filename,
+                 'datecommitted': job.datecommitted.strftime(dateformat),
+                 'flagged': job.flagged})
 
     return f"Success, job {jobid} was updated to stage {jobstage}!"
 
@@ -197,8 +212,16 @@ def check_stages(old_bad_stage=None, new_redo_stage=None):
                     j.jobstage = new_redo_stage
                     j.flagged = 0
                     n_bad_jobs += 1
+
+                    # Broadcast changes to webpage conncetions
+                    bcast_change_job(j.jobid,
+                            {'datecommitted': j.datecommitted.strftime(dateformat),
+                             'jobstage': j.jobstage,
+                             'flagged': j.flagged})
+
                 # Update these stages
                 db.session.commit()
+
             return json.dumps({
                 'Are all simulations within time frame?': is_good,
                 'n_bad_jobs were degraded:': n_bad_jobs}).encode('utf8')
@@ -244,14 +267,14 @@ def get_jobs(jobstage=None, nextstage=None):
         njobs = count_jobs()
         nstages = count_stages()
         ncomplete = count_jobs(nstages)
-        if njobs > 0:
-            percent = int(ncomplete/njobs * 100)
-        else:
-            percent = 0
+        #if njobs > 0:
+        #    percent = int(ncomplete/njobs * 100)
+        #else:
+        #    percent = 0
 
         alljobs = Engine.query.all()
         check_job_status()
-        return render_template('joblist.html', jobs=alljobs, percent=percent)
+        return render_template('joblist.html', jobs=alljobs, njobs=njobs, ncomplete=ncomplete, nstages=nstages)
 
 """
 "
@@ -366,6 +389,29 @@ def check_job_status(jobstage=None, jobix=None):
 
     return isgood
 
+"""
+"
+" change_job
+"
+"""
+def bcast_change_job(jobid=None, jobkw=None):
+    """ Broadcasts changes to this job
+        to all connected clients
+        which will update the relevant tags
+    """
+    if jobkw:
+        data_out = {'jobid':jobid, **jobkw}
+        #data_out = json.dumps(data_out_dict).encode('utf8')
+        socketio.emit('job change', data_out, broadcast=True)
+
+    return
+
+def bcast_reload():
+    """ Broadcasts a reload request
+    """
+    socketio.emit('reload', broadcast=True)
+
+
 
 
 if __name__ == "__main__":
@@ -377,5 +423,6 @@ if __name__ == "__main__":
         # initialize lifetime DB
         db.create_all(bind='lifetimes')
 
-    app.run(ssl_context='adhoc')
+    #app.run(ssl_context='adhoc')
+    socketio.run(app) #, ssl_context='adhoc')
 

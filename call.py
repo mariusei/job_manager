@@ -10,10 +10,10 @@ jobids = {
         }
 jobids_json = json.dumps(jobids).encode("utf8")
 
-url = 'https://localhost:5000'
+url = 'http://localhost:5000'
 jobix = 1234
 jsonhead = {'Content-Type': 'application/json'}
-context = ssl._create_unverified_context()
+context = None #ssl._create_unverified_context()
 authead = {'jobix': jobix}
 
 # Hello
@@ -23,7 +23,7 @@ print(res.read().decode('utf8'))
 res.close()
 
 # Init job list
-lifetime = '0/10/3'
+lifetime = '0/1/1'
 req = u.Request(f"{url}/init/{lifetime}", headers=authead)
 res = u.urlopen(req, context=context)
 print('In init job list/lifetimes:', res.read())
@@ -52,17 +52,17 @@ res = u.urlopen(req, context=context)
 print(res.read())
 res.close()
 
-# Downgrade bad stages
-oldstage = 2
-newstage = 1
-req = u.Request(f"{url}/check_stages/{oldstage}/{newstage}", headers=authead)
-res = u.urlopen(req, context=context)
-print(res.read())
-res.close()
+## Downgrade bad stages
+#oldstage = 2
+#newstage = 1
+#req = u.Request(f"{url}/check_stages/{oldstage}/{newstage}", headers=authead)
+#res = u.urlopen(req, context=context)
+#print(res.read())
+#res.close()
 
 # Upgrade a job
-jobid = 7
-newstage = 1
+jobid = 5 
+newstage = 2
 req = u.Request(f"{url}/update_job/{jobid}/{newstage}", headers=authead)
 res = u.urlopen(req, context=context)
 print(res.read())
