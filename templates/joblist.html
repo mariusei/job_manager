@@ -7,6 +7,9 @@
     var ncomplete = {{ ncomplete }};
     var nstages = {{ nstages }};
     var percent = 0;
+    // Change job/div based on its id components
+    var working_node;
+    var flagged_node;
 
     function set_percentage(){
         percent_count = document.getElementById("progress_percent");
@@ -21,21 +24,24 @@
         percent_bar.value = percent;
     }
 
+    function get_main_nodes(){
+        working_node = document.getElementById("working_nodes");
+        flagged_node = document.getElementById("flagged_nodes");
+    }
+
     socket.on("reload", function(){
         location.reload();
     });
 
     window.onload = function() {
         set_percentage();
+        get_main_nodes();
     }
 
-    // Change job/div based on its id components
-    var working_node = document.getElementById("working_nodes");
-    var flagged_node = document.getElementById("flagged_nodes");
     socket.on("job change", function(job){
-        //console.log("Received job change alert...");
+        console.log("Received job change alert...");
         //console.log(job);
-        //
+        //console.log(working_node, flagged_node);
         var value;
         var old_value;
         for (var key in job){
@@ -116,7 +122,7 @@
 {% endfor %}
 </div>
 
-<h2>Flagged jobs</h2>
+<h2>Expired jobs</h2>
 <hr>
 <div id="flagged_nodes">
 {% for item in jobs %}

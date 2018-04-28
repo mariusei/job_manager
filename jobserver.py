@@ -26,13 +26,13 @@ db = SQLAlchemy(app)
 
 
 class Engine(db.Model):
-    # Authentication needed to look up entries 
+    # Authentication needed to look up entries
     jobix = db.Column(db.Integer)
     # Job IDs pointing to position in local job array
     jobid = db.Column(db.Integer, primary_key=True)
     # Job stage: user can request jobs to be moved between stages
     jobstage = db.Column(db.Integer)
-    # Job commitment time: a job could die, meaning it should be degraded 
+    # Job commitment time: a job could die, meaning it should be degraded
     # and made available for workers
     datecommitted = db.Column(db.DateTime)
     # If the job has surpassed its allocated time:
@@ -57,6 +57,19 @@ class Lifetime(db.Model):
 """
 @app.route("/")
 def hello():
+    # Initialize files if they don't exist
+    # and have data
+    if not os.path.exists('joblist.db') or os.stat('joblist.db').st_size ==0:
+        # Initialize DB
+        #from . import db
+        db.create_all()
+    else:
+        # Check if all desired columns exist
+        pass
+
+    if not os.path.exists('lifetimes.db') or os.stat('lifetimes.db').st_size ==0:
+        # initialize lifetime DB
+        db.create_all(bind='lifetimes')
     return "Hello World!"
 
 """
@@ -69,7 +82,7 @@ def hello():
 def init_ix(stage_times=None):
     """ Initializes lifeties from
         /init/0_in_min/.../i_n_min/.../n_in_min
-        for each of the i_in_min stages 
+        for each of the i_in_min stages
         where the i_in_min is given in minutes.
 
         0 lifetime indicates infinity
@@ -108,17 +121,17 @@ def init_ix(stage_times=None):
 
 """
 "
-" set_jobs 
+" set_jobs
 "
 """
 @app.route("/set", methods=['POST'])
 def set_jobs():
     """ Sets a job entry/entries to jobix,
         reads jobix from encrypted header
-        and jobids, jobstage from serialized 
+        and jobids, jobstage from serialized
         json dictionary.
     """
-    
+
     if request.method == 'POST':
         jobix = int(request.headers['jobix'])
         ids = request.get_json()
@@ -143,7 +156,7 @@ def set_jobs():
 
 """
 "
-" update_job 
+" update_job
 "
 """
 @app.route("/update_job/<int:jobid>/<int:jobstage>", methods=['GET', 'POST'])
@@ -174,7 +187,7 @@ def update_job(jobid=None, jobstage=None):
 
         # Update entry
         db.session.commit()
-        
+
         # Broadcast changes to webpage conncetions
         bcast_change_job(job.jobid,
                 {'jobstage': job.jobstage,
@@ -184,7 +197,7 @@ def update_job(jobid=None, jobstage=None):
 
     return f"Success, job {jobid} was updated to stage {jobstage}!"
 
-        
+
 
 """
 "
@@ -415,13 +428,6 @@ def bcast_reload():
 
 
 if __name__ == "__main__":
-    if not os.path.exists('joblist.db'):
-        # Initialize DB
-        #from . import db
-        db.create_all()
-    if not os.path.exists('lifetimes.db'):
-        # initialize lifetime DB
-        db.create_all(bind='lifetimes')
 
     #app.run(ssl_context='adhoc')
     socketio.run(app) #, ssl_context='adhoc')
