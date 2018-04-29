@@ -97,9 +97,9 @@ This way is a job either in two possible states:
 
 See
 
-- [`call.py`](../blob/master/call.py) for possible function calls to a web server or
-- [`call2.py`](../blob/master/call2.py) for a functional approach for a worker that does work until no more remains.
+- [`call.py`](../master/call.py) for possible function calls to a web server or
+- [`call2.py`](../master/call2.py) for a functional approach for a worker that does work until no more remains.
 
 ## Screenshot
 
-![Some workers are flagged as inactive/died as they have spent more time in their stage than allowed](../blob/master/img/screenshot.png)
+![Some workers are flagged as inactive/died as they have spent more time in their stage than allowed](../master/img/screenshot.png)
