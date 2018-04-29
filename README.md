@@ -61,6 +61,7 @@ Other dependencies for the server:
 whereas the client needs:
 
 - json
+- zlib
 - ssl (potentially, if HTTPS is desired)
 - urllib (beware of scam versions phoning home!)
 
