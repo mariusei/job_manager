@@ -23,7 +23,7 @@ Call `python jobserver.py`. It will probably listen on port `5000`.
 Define `url = http://localhost:5000` and a secret `jobix` (an arbitrary number used as a primitive way of preventing hijacking of the database) in `my_url_file.py` and call `python call.py`.  The status is shown at [localhost:5000/get](http://localhost:5000/get).
 
 
-### Produciont setup
+### Production setup
 
 Clone the repository to a folder where it could potentially be launched as a WSGI application, or locally as a Flask application.
 
