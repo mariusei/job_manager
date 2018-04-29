@@ -1,5 +1,6 @@
 
 import json
+import zlib
 import os
 import datetime
 
@@ -21,6 +22,9 @@ app.config['SQLALCHEMY_BINDS'] = {
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 dateformat = "%Y-%m-%d %H:%M:%S"
+
+# List of jobs that have been pushed to web page
+jobs_on_webpage = []
 
 db = SQLAlchemy(app)
 
@@ -59,17 +63,7 @@ class Lifetime(db.Model):
 def hello():
     # Initialize files if they don't exist
     # and have data
-    if not os.path.exists('joblist.db') or os.stat('joblist.db').st_size ==0:
-        # Initialize DB
-        #from . import db
-        db.create_all()
-    else:
-        # Check if all desired columns exist
-        pass
-
-    if not os.path.exists('lifetimes.db') or os.stat('lifetimes.db').st_size ==0:
-        # initialize lifetime DB
-        db.create_all(bind='lifetimes')
+    init_db_if_not_existing()
     return "Hello World!"
 
 """
@@ -113,10 +107,12 @@ def init_ix(stage_times=None):
         lts_new = {i.jobstage: i.lifetime for i in lts_q}
         # Reload web pages
         bcast_reload()
+        bcast_jobstage_counter()
         return json.dumps(lts_new).encode("utf8")
     else:
         # Reload web pages
         bcast_reload()
+        bcast_jobstage_counter()
         return json.dumps(Lifetime.query.all()).encode("utf8")
 
 """
@@ -131,10 +127,11 @@ def set_jobs():
         and jobids, jobstage from serialized
         json dictionary.
     """
+    init_db_if_not_existing()
 
     if request.method == 'POST':
         jobix = int(request.headers['jobix'])
-        ids = request.get_json()
+        ids = json.loads(zlib.decompress(request.data))
         # Create new DB entries:
         for ii in ids.keys():
             #print(f"checking: jobix {jobix} and jobid {ii}")
@@ -167,26 +164,39 @@ def update_job(jobid=None, jobstage=None):
     else:
         abort(403, "jobix must be specified in header!")
 
+    init_db_if_not_existing()
+
+    #print("Updated DB")
+
     if request.method == 'POST':
         # We will receive a save path
         # that the worker for the next step can use for its
         # analysis
-        req_fname = request.get_json()
+        req_fname = json.loads(zlib.decompress(request.data))
         filename = req_fname['filename'].encode("utf8")
+        #print(f"req_fname {req_fname} and filename {filename}")
     else:
         # Not neccessarily so that a job updates a filename
         filename = None
+        #print(f"No filename")
 
     # Alter the corresponding job:
     job = Engine.query.filter_by(jobix=jobix, jobid=jobid).first()
+    print(f"Found job {job}")
     if job:
         job.jobstage = jobstage
         job.filename = filename or job.filename
         job.datecommitted=datetime.datetime.now()
         job.flagged = 0
 
+        #print(f"Committing changes to job {job}")
+
         # Update entry
         db.session.commit()
+
+        #print(f"Committed change!")
+
+        #print(f"Broadcasting change!")
 
         # Broadcast changes to webpage conncetions
         bcast_change_job(job.jobid,
@@ -194,6 +204,9 @@ def update_job(jobid=None, jobstage=None):
                  'filename': job.filename,
                  'datecommitted': job.datecommitted.strftime(dateformat),
                  'flagged': job.flagged})
+        bcast_jobstage_counter()
+
+        #print(f"Done with broadcasting!")
 
     return f"Success, job {jobid} was updated to stage {jobstage}!"
 
@@ -213,6 +226,8 @@ def check_stages(old_bad_stage=None, new_redo_stage=None):
     if 'jobix' in request.headers:
         jobix = int(request.headers['jobix'])
 
+        init_db_if_not_existing()
+
         if old_bad_stage and new_redo_stage:
             # Downgrade jobs that are flagged
             n_bad_jobs = 0
@@ -231,6 +246,7 @@ def check_stages(old_bad_stage=None, new_redo_stage=None):
                             {'datecommitted': j.datecommitted.strftime(dateformat),
                              'jobstage': j.jobstage,
                              'flagged': j.flagged})
+                    bcast_jobstage_counter()
 
                 # Update these stages
                 db.session.commit()
@@ -259,6 +275,8 @@ def get_jobs(jobstage=None, nextstage=None):
     """ Returns first available job in `jobstage`
     """
 
+    init_db_if_not_existing()
+
     if jobstage is not None:
         # Job list index:
         jobix = int(request.headers['jobix'])
@@ -274,20 +292,45 @@ def get_jobs(jobstage=None, nextstage=None):
                db.session.commit()
         else:
             res = json.dumps('nada').encode("utf8")
+
+        bcast_jobstage_counter()
         return res
     else:
         # Display web page with all jobs
+        # or, if there are too many, show only jobs in odd stages
+        # where they are performing work (assuming even stages are init/final ones)
         njobs = count_jobs()
         nstages = count_stages()
         ncomplete = count_jobs(nstages)
-        #if njobs > 0:
-        #    percent = int(ncomplete/njobs * 100)
-        #else:
-        #    percent = 0
 
-        alljobs = Engine.query.all()
+        # set some global variables
+        g.njobs = njobs
+        g.nstages = nstages
+        g.ncomplete = ncomplete
+
+        alljobs = []
+
+        if njobs > 1024:
+            # Too many jobs!
+            noddstages = nstages//2 + nstages%2
+            for i in range(noddstages):
+                iodd = 2*i + 1
+                odd_jobs = Engine.query.filter_by(jobstage=iodd)
+                # add these to the web page list
+                alljobs.extend(odd_jobs)
+        else:
+            alljobs = Engine.query.all()
+
+        # Find their indices:
+        for job in alljobs:
+            jobs_on_webpage.append(job.jobid)
+
         check_job_status()
-        return render_template('joblist.html', jobs=alljobs, njobs=njobs, ncomplete=ncomplete, nstages=nstages)
+        jobcount = bcast_jobstage_counter()
+        return render_template('joblist.html',
+                jobs=alljobs,
+                njobs=njobs, ncomplete=ncomplete, nstages=nstages,
+                jobcount=jobcount)
 
 """
 "
@@ -300,6 +343,8 @@ def get_jobs(jobstage=None, nextstage=None):
 def set_lifetime(jobstage=None, n_minutes=None):
     """ Sets the lifetime a job can have in a jobstage
     """
+
+    init_db_if_not_existing()
 
     if jobstage and n_minutes:
         # Set a lifetime
@@ -335,7 +380,7 @@ def count_jobs(jobstage=None):
         a given jobstage or them all
     """
 
-    if jobstage:
+    if jobstage is not None:
         extra = f"WHERE jobstage = {jobstage};"
     else:
         extra = ";"
@@ -344,7 +389,7 @@ def count_jobs(jobstage=None):
         FROM engine
         {extra}
         """).first()
-    print(f"Found n_jobs: {query[0]}")
+    print(f"Found n_jobs: {query[0]} with jobstage: {jobstage}")
     return int(query[0])
 
 """
@@ -388,7 +433,7 @@ def check_job_status(jobstage=None, jobix=None):
             q = Lifetime.query.filter_by(jobix=jobix, jobstage=j_stage).first()
         else:
             q = Lifetime.query.filter_by(jobstage=j_stage).first()
-        print("RESULT:", q, 'for jobstage', j_stage)
+        #print("RESULT:", q, 'for jobstage', j_stage)
         if q and q.lifetime:
             if t_now - t_then > datetime.timedelta(minutes=q.lifetime):
                 # Turn into negative
@@ -396,11 +441,69 @@ def check_job_status(jobstage=None, jobix=None):
                 j.flagged = 1
         else:
             isgood += 100
-            print(f"WARNING! No maximum time has been set for stage {j_stage}!")
+            #print(f"WARNING! No maximum time has been set for stage {j_stage}!")
     # Update flags
     db.session.commit()
 
     return isgood
+
+"""
+"
+" init_db_if_not_existing
+"
+"""
+
+def init_db_if_not_existing():
+    jlist = 'joblist.db'
+    lives = 'lifetimes.db'
+    if not os.path.exists(jlist) or os.stat(jlist).st_size ==0:
+        # Initialize DB
+        #from . import db
+        if os.path.exists(jlist): os.remove(jlist)
+        db.create_all()
+    else:
+        # Check if all desired columns exist
+        pass
+
+    if not os.path.exists(lives) or os.stat(lives).st_size ==0:
+        # initialize lifetime DB
+        if os.path.exists(lives): os.remove(lives)
+        db.create_all(bind='lifetimes')
+
+    return 'ok'
+
+"""
+"
+" update_webpage_jobstage_counter
+"
+"""
+def bcast_jobstage_counter():
+    """ Counts number of jobs in each of
+        the stages and sends this to the
+        client
+    """
+    try:
+        g.nstages
+    except AttributeError:
+        g.nstages = count_stages()
+    try:
+        g.njobs
+    except AttributeError:
+        g.njobs = count_jobs()
+
+    stagejobs = dict()
+    stagejobs['ntot'] = g.njobs
+    stagejobs['nstages'] = g.nstages
+
+    # Enumerate through each stage and find the corresponding number of jobs
+    stagejobs['count'] = [count_jobs(i) for i in range(g.nstages + 1)]
+
+    # Broadcast this newly obtained list
+    socketio.emit('counted jobs in stages', stagejobs, broadcast=True)
+    #socketio.emit('counted jobs in stages', {'empty': 0}, broadcast=True)
+
+    return stagejobs['count']
+
 
 """
 "
@@ -413,9 +516,10 @@ def bcast_change_job(jobid=None, jobkw=None):
         which will update the relevant tags
     """
     if jobkw:
-        data_out = {'jobid':jobid, **jobkw}
-        #data_out = json.dumps(data_out_dict).encode('utf8')
-        socketio.emit('job change', data_out, broadcast=True)
+        if jobid in jobs_on_webpage:
+            data_out = {'jobid':jobid, **jobkw}
+            #data_out = json.dumps(data_out_dict).encode('utf8')
+            socketio.emit('job change', data_out, broadcast=True)
 
     return
 

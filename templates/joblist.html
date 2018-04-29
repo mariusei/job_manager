@@ -1,4 +1,24 @@
 {% extends "base.html" %}
+{% block style %}
+
+div.stagebar_wrapper {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+}
+
+div.stagebar_column {
+    display: inline block;
+    margin: 0.5rem;
+    background: #e0e0e0;
+    color: #0277bd;
+    text-align: center;
+    vertical-align: middle;
+    height: 1.5em;
+}
+
+{% endblock %}
+
 {% block scripts %}
 <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/socket.io/1.3.6/socket.io.min.js"></script>
 <script type="text/javascript" charset="utf-8">
@@ -10,10 +30,12 @@
     // Change job/div based on its id components
     var working_node;
     var flagged_node;
+    var stagejobs = { 'ntot': {{ njobs }}, 'nstages': {{ nstages }}, 'count': {{ jobcount }} };
 
     function set_percentage(){
         percent_count = document.getElementById("progress_percent");
         percent_bar = document.getElementById("progress_total");
+        //console.log("Estimating percentage: with ncomplete", ncomplete, "njobs:", njobs, "and counts", stagejobs);
         if (ncomplete > 0) {
             percent = parseInt(100.0 * ncomplete / njobs);
         } else {
@@ -34,12 +56,47 @@
     });
 
     window.onload = function() {
+        console.log('On window.onload:')
         set_percentage();
+        set_stagebars();
         get_main_nodes();
+        console.log('Done window.onload.')
     }
 
+    function set_stagebars() {
+        // Update the job distribution bar
+        njobs = stagejobs['ntot']
+        var nstages = stagejobs['nstages']
+        var bar;
+        //console.log("setting stagebars...", njobs , nstages);
+        if (njobs > 0) {
+            var percents = stagejobs['count'].map(function(n) {
+                return percent = 100.0*n / njobs;
+            });
+
+            var bars = percents.map(function(pc, ix) {
+                bar = document.getElementById("stagebar " + ix);
+                bar.style = "width: " + pc + "%";
+                bar.innerHTML = stagejobs['count'][ix];
+                return 0;
+            });
+        }
+    }
+
+
+    socket.on("counted jobs in stages", function(count){
+        // Update global variable stagejobs
+        //console.log("counted jobs in stages", count);
+        stagejobs = count;
+        ncomplete = count['count'][count['count'].length-1]
+        set_stagebars();
+        set_percentage();
+
+
+    });
+
     socket.on("job change", function(job){
-        console.log("Received job change alert...");
+        //console.log("Received job change alert...");
         //console.log(job);
         //console.log(working_node, flagged_node);
         var value;
@@ -53,7 +110,7 @@
             }
             //console.log('value for key', key, 'is', value);
             var entry = document.getElementById(key + " " + job["jobid"]);
-            if (key == "flagged") {
+            if (entry && key == "flagged") {
                 // Determine if this object must be moved
                 if (job[key] == 1 && entry.parentNode.id == "working_nodes") {
                     // Move!
@@ -63,11 +120,10 @@
                 }
             }
             // Check if job completed? 
-            if (key == "jobstage") {
+            if (entry && key == "jobstage") {
                 oldstage = entry.innerHTML;
                 if (job[key] > oldstage && job[key] == nstages) {
                     ncomplete += 1;
-                    set_percentage();
                 }
             }
             if (entry && key != "flagged") {
@@ -75,6 +131,9 @@
             } else {
                 console.log('Unkown element ID:', key);
             }
+            // These two must be called from server
+            //set_stagebars();
+            //set_percentage();
         }
     });
 </script>
@@ -87,6 +146,13 @@
 <div id="progress_percent" class="col-sm-1" style="text-align: right"><h2> 0% </h2></div>
 </div>
 <progress id="progress_total" value="0" max="100"></progress>
+<div class="row">
+<div class="stagebar_wrapper">
+    {% for stage in range(nstages+1) %}
+    <div class="stagebar_column" id="stagebar {{ stage }}" style="width: {{ 100/(nstages+1)}}%">{{ stage }}</div>
+    {% endfor %}
+</div>
+</div>
 <hr>
 
 <div class="row">
