@@ -37,8 +37,12 @@ free_jobs = True
 job_stage = 1
 newstage = 2
 
+maxi = 2
+i = 0
+
 print("Asking for jobs...")
-while free_jobs:
+while free_jobs and i < maxi:
+    i += 1
     # Check if there are jobs
     info = ask_for_job(job_stage)
     if info != 'nada':
