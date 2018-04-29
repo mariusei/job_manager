@@ -119,6 +119,6 @@ This way is a job either in two possible states:
 
 See
 
-- [`call.py`](../master/call.py) for possible function calls to a web server or
+- [`call.py`](../master/call.py) for possible function calls where a list of jobs is established on a web server, jobs are updated, demoted, changed and checked.
 - [`call2.py`](../master/call2.py) for a functional approach for a worker that does work until no more remains.
 
