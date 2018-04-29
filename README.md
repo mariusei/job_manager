@@ -3,6 +3,17 @@ FLASK-based supercomputing job manager
 
 ![Some workers are flagged as inactive/died as they have spent more time in their stage than allowed](../master/img/screenshot.png)
 
+## Description
+
+This [Flask](http://flask.pocoo.org/) web application manages a list of jobs that can be pushed from a master node and obtained from an arbitrary number of independent worker nodes that not necessarily have the ability to communicate between themselves.
+
+Examples of this can be:
+- A supercomputer where the clusters have upper limits on the number of nodes that can be organized as a single job under MPI. One needs very clever scheduling and job assignments to make sure that **(a)** all jobs get done, **(b)** no overlap between workers occur, and **(c)** corrupted results do not get forwarded in a data processing pipeline.
+- Several independent nodes that will work on an unknown amount of data as it become available at an unknown time.
+- A project where MPI/communication between workers is overkill as the problem is massively parallelizable.
+
+It features a FLASK interface allowing for JSON requests in Python from workers, and also provides a web interface showing the overall progress using [Socket.io](https://socket.io/).
+
 ## Setup
 
 Clone the repository to a folder where it could potentially be launched as a WSGI application, or locally as a Flask application.
