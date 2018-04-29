@@ -32,8 +32,10 @@ db = SQLAlchemy(app)
 class Engine(db.Model):
     # Authentication needed to look up entries
     jobix = db.Column(db.Integer)
-    # Job IDs pointing to position in local job array
+    # Job IDs
     jobid = db.Column(db.Integer, primary_key=True)
+    # Jobs, this is the instruction
+    jobcmd = db.Column(db.PickleType)
     # Job stage: user can request jobs to be moved between stages
     jobstage = db.Column(db.Integer)
     # Job commitment time: a job could die, meaning it should be degraded
@@ -141,10 +143,14 @@ def set_jobs():
                 entry = Engine(
                         jobix=jobix,
                         jobid=ii,
+                        jobcmd=ids[ii]['jobcmd'],
                         jobstage=ids[ii]['jobstage'],
                         datecommitted=datetime.datetime.now())
                 db.session.add(entry)
                 db.session.commit()
+        bcast_reload()
+        bcast_jobstage_counter()
+
         print("post accepted!")
         return f"Accepted to {jobix}!"
     else:
@@ -169,16 +175,25 @@ def update_job(jobid=None, jobstage=None):
     #print("Updated DB")
 
     if request.method == 'POST':
-        # We will receive a save path
+        # We could receive both a save path and a new unpickleable job command
         # that the worker for the next step can use for its
         # analysis
-        req_fname = json.loads(zlib.decompress(request.data))
-        filename = req_fname['filename'].encode("utf8")
+        req = json.loads(zlib.decompress(request.data))
+        if 'filename' in req:
+            filename = req['filename'].encode("utf8")
+        else:
+            filenae = None
+        if 'jobcmd' in req:
+            jobcmd = req['jobcmd']
+        else:
+            jobcmd = None
+
         #print(f"req_fname {req_fname} and filename {filename}")
     else:
-        # Not neccessarily so that a job updates a filename
+        # Not neccessarily so that a job updates filename/job command
         filename = None
-        #print(f"No filename")
+        jobcmd = None
+        #print(f"No filename/command")
 
     # Alter the corresponding job:
     job = Engine.query.filter_by(jobix=jobix, jobid=jobid).first()
@@ -186,6 +201,7 @@ def update_job(jobid=None, jobstage=None):
     if job:
         job.jobstage = jobstage
         job.filename = filename or job.filename
+        job.jobcmd = jobcmd or job.jobcmd
         job.datecommitted=datetime.datetime.now()
         job.flagged = 0
 
@@ -284,16 +300,33 @@ def get_jobs(jobstage=None, nextstage=None):
         job = Engine.query.filter_by(jobstage=jobstage).first()
         if job is not None:
             res = json.dumps({'jobid': job.jobid,
+                              'jobcmd': job.jobcmd,
                               'jobstage': job.jobstage,
                               'jobix': job.jobix}).encode("utf8")
             if nextstage:
                # Immediately make this job unavailable!
                job.jobstage = nextstage
-               db.session.commit()
+            else:
+               job.jobstage += 1
+
+            # No longer flagged as bad
+            job.flagged = 0
+
+            # Update the time for comitting at this stage
+            job.datecommitted=datetime.datetime.now()
+
+            db.session.commit()
+
+            # Broadcast changes to webpage conncetions
+            bcast_change_job(job.jobid,
+                    {'jobstage': job.jobstage,
+                     'flagged': job.flagged})
+            # And percentage/progress bar
+            bcast_jobstage_counter()
+
         else:
             res = json.dumps('nada').encode("utf8")
 
-        bcast_jobstage_counter()
         return res
     else:
         # Display web page with all jobs
