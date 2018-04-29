@@ -12,7 +12,7 @@ Examples of this can be:
 - Several independent nodes that will work on an unknown amount of data as it become available at an unknown time.
 - A project where MPI/communication between workers is overkill as the problem is massively parallelizable.
 
-It features a Flask interface allowing for JSON requests in Python from workers, storing of job information in an [SQLite](https://www.sqlite.org/index.html) database, and also provides a web interface showing the overall progress using [Socket.io](https://socket.io/).
+It features a Flask interface allowing for JSON requests in Python from workers, storing of job information in an [SQLite](https://www.sqlite.org/index.html) database, and also provides a web interface built using the [MiniCSS](https://minicss.org/) framework showing the overall progress using [Socket.io](https://socket.io/).
 
 ## Setup
 
