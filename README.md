@@ -1,6 +1,8 @@
 # job_manager
 FLASK-based supercomputing job manager
 
+![Some workers are flagged as inactive/died as they have spent more time in their stage than allowed](../master/img/screenshot.png)
+
 ## Setup
 
 Clone the repository to a folder where it could potentially be launched as a WSGI application, or locally as a Flask application.
@@ -100,6 +102,3 @@ See
 - [`call.py`](../master/call.py) for possible function calls to a web server or
 - [`call2.py`](../master/call2.py) for a functional approach for a worker that does work until no more remains.
 
-## Screenshot
-
-![Some workers are flagged as inactive/died as they have spent more time in their stage than allowed](../master/img/screenshot.png)
