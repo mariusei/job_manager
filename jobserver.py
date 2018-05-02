@@ -7,52 +7,96 @@ import datetime
 from flask import Flask, request, g
 from flask import render_template
 from flask import abort
-from flask_sqlalchemy import SQLAlchemy
+#from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO
+
+import pmdb
+import glob
 
 
 app = Flask(__name__, instance_relative_config=True)
 socketio = SocketIO(app)
 
 # Job list SQLite database
-app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:///joblist.db"
-app.config['SQLALCHEMY_BINDS'] = {
-        'lifetimes': "sqlite:///lifetimes.db"
-        }
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+#app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:///joblist.db"
+#app.config['SQLALCHEMY_BINDS'] = {
+#        'lifetimes': "sqlite:///lifetimes.db"
+#        }
+#app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 dateformat = "%Y-%m-%d %H:%M:%S"
+lt_file_ = "lifetimes_{jobix}.json"
+db_file_ = "database_{jobix}.pmem"
+job_len_file_ = "joblen_{jobix}.json"
 
 # List of jobs that have been pushed to web page
 jobs_on_webpage = []
 
-db = SQLAlchemy(app)
+#db = SQLAlchemy(app)
+
+def set_or_update_job_len(jobix, n):
+    # Check if length of jobs already have been set?
+    with open(job_len_file_.format(jobix=jobix), "w") as fout:
+        json.dump({'njobs': n}, fout)
+
+def get_job_len(jobix):
+    if os.path.exists(job_len_file_.format(jobix=jobix)):
+        with open(job_len_file_.format(jobix=jobix), "r") as fin:
+            n = int(json.load(fin)['njobs'])
+    else:
+        n = 0
+    return n
+
+def set_lifetimes(jobix, lifetimes):
+    with open(lt_file_.format(jobix=jobix), "w") as fout:
+        json.dump(lifetimes, fout)
+
+def get_lifetimes(jobix):
+    if os.path.exists(lt_file_.format(jobix=jobix)):
+        with open(lt_file_.format(jobix=jobix), "rb") as fin:
+            lts = json.load(fin)
+    else :
+        lts = []
+    return lts
+
+def update_lifetimes(jobix, stage, lifetime):
+    if os.path.exists(lt_file_.format(jobix=jobix)):
+        with open(lt_file_.format(jobix=jobix), "r") as fin:
+            lts = json.load(fin)
+        # Change the lifetime at this stage
+        lts[stage] = lifetime
+        # Save updated json file:
+        with open(lt_file_.format(jobix=jobix), "w") as fout:
+            json.dump(lifetimes, fout)
+    else :
+        lts = []
+    return lts
 
 
-class Engine(db.Model):
-    # Authentication needed to look up entries
-    jobix = db.Column(db.Integer)
-    # Job IDs
-    jobid = db.Column(db.Integer, primary_key=True)
-    # Jobs, this is the instruction
-    jobcmd = db.Column(db.PickleType)
-    # Job stage: user can request jobs to be moved between stages
-    jobstage = db.Column(db.Integer)
-    # Job commitment time: a job could die, meaning it should be degraded
-    # and made available for workers
-    datecommitted = db.Column(db.DateTime)
-    # If the job has surpassed its allocated time:
-    flagged = db.Column(db.Integer)
-    # Filnames for last output
-    filename = db.Column(db.String)
-
-class Lifetime(db.Model):
-    __bind_key__ = 'lifetimes'
-    # Combines: jobix, jobstage and lifetime
-    id = db.Column(db.Integer, autoincrement=True, primary_key=True)
-    jobix = db.Column(db.Integer)
-    jobstage = db.Column(db.Integer)
-    lifetime = db.Column(db.Integer) # minutes
+#class Engine(db.Model):
+#    # Authentication needed to look up entries
+#    jobix = db.Column(db.Integer)
+#    # Job IDs
+#    jobid = db.Column(db.Integer, primary_key=True)
+#    # Jobs, this is the instruction
+#    jobcmd = db.Column(db.PickleType)
+#    # Job stage: user can request jobs to be moved between stages
+#    jobstage = db.Column(db.Integer)
+#    # Job commitment time: a job could die, meaning it should be degraded
+#    # and made available for workers
+#    datecommitted = db.Column(db.DateTime)
+#    # If the job has surpassed its allocated time:
+#    flagged = db.Column(db.Integer)
+#    # Filnames for last output
+#    filename = db.Column(db.String)
+#
+#class Lifetime(db.Model):
+#    __bind_key__ = 'lifetimes'
+#    # Combines: jobix, jobstage and lifetime
+#    id = db.Column(db.Integer, autoincrement=True, primary_key=True)
+#    jobix = db.Column(db.Integer)
+#    jobstage = db.Column(db.Integer)
+#    lifetime = db.Column(db.Integer) # minutes
 
 
 
@@ -65,7 +109,7 @@ class Lifetime(db.Model):
 def hello():
     # Initialize files if they don't exist
     # and have data
-    init_db_if_not_existing()
+    #init_db_if_not_existing()
     return "Hello World!"
 
 """
@@ -94,28 +138,55 @@ def init_ix(stage_times=None):
 
         # Verify that the lifetimes haven't already been set
         # (they can be changed with another function)
-        if not Lifetime.query.filter_by(jobix=jobix).first():
-            # add these to the database
-            for i, lt in enumerate(lifetimes):
-                lt = int(lt)
-                entry = Lifetime(
-                        jobix = jobix,
-                        jobstage = i,
-                        lifetime = lt
-                        )
-                db.session.add(entry)
-                db.session.commit()
-        lts_q = Lifetime.query.all()
-        lts_new = {i.jobstage: i.lifetime for i in lts_q}
+        #if not Lifetime.query.filter_by(jobix=jobix).first():
+        #    # add these to the database
+        #    for i, lt in enumerate(lifetimes):
+        #        lt = int(lt)
+        #        entry = Lifetime(
+        #                jobix = jobix,
+        #                jobstage = i,
+        #                lifetime = lt
+        #                )
+        #        db.session.add(entry)
+        #        db.session.commit()
+        #lts_q = Lifetime.query.all()
+        #lts_new = {i.jobstage: i.lifetime for i in lts_q}
+
+        # New lifetimes:
+        g.lifetimes = lifetimes
+        lts_new = json.dumps(g.lifetimes).encode("utf8")
+
+        # And store it to file
+        lt_file = lt_file_.format(jobix=jobix)
+        print(f"does {lt_file} exist? {os.path.exists(lt_file)}")
+        print(f"{lt_file} abspath: {os.path.abspath(lt_file)}")
+        if not os.path.exists(lt_file) or os.stat(lt_file).st_size ==0:
+            with open(lt_file, "w") as fout:
+                json.dump(lifetimes, fout)
+            # Set global:
+        else:
+            # Verify that old/new lifetimes match
+            with open(lt_file, "rb") as fin:
+                lts_old = json.load(fin)
+            assert lifetimes == lts_old, ("Lifetimes don't match!", lifetimes, lts_old)
+
         # Reload web pages
         bcast_reload()
         bcast_jobstage_counter()
-        return json.dumps(lts_new).encode("utf8")
+        return lts_new
     else:
         # Reload web pages
         bcast_reload()
         bcast_jobstage_counter()
-        return json.dumps(Lifetime.query.all()).encode("utf8")
+        if len(glob.glob(lt_file_.replace("{job_ix}", "*"))) > 0:
+            jobix_ = int(glob.glob(lt_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
+
+            lts = get_lifetimes(jobix_)
+        else :
+            lts = []
+
+        #return json.dumps(Lifetime.query.all()).encode("utf8")
+        return json.dumps(lts).encode("utf8")
 
 """
 "
@@ -129,27 +200,75 @@ def set_jobs():
         and jobids, jobstage from serialized
         json dictionary.
     """
-    init_db_if_not_existing()
 
     if request.method == 'POST':
-        jobix = int(request.headers['jobix'])
+        if 'jobix' in request.headers:
+            jobix = int(request.headers['jobix'])
+        else:
+            abort(403, "jobix must be specified in header!")
+
+        init_db_if_not_existing(jobix)
+
         ids = json.loads(zlib.decompress(request.data))
-        # Create new DB entries:
-        for ii in ids.keys():
-            #print(f"checking: jobix {jobix} and jobid {ii}")
-            #print("Does it exist?", Engine.query.filter_by(jobix=jobix, jobid=ii).first())
-            if not Engine.query.filter_by(jobix=jobix, jobid=ii).first():
-                # This job does not exist:
-                entry = Engine(
-                        jobix=jobix,
-                        jobid=ii,
-                        jobcmd=ids[ii]['jobcmd'],
-                        jobstage=ids[ii]['jobstage'],
-                        datecommitted=datetime.datetime.now())
-                db.session.add(entry)
-                db.session.commit()
-        bcast_reload()
-        bcast_jobstage_counter()
+        ## Create new DB entries:
+        #for ii in ids.keys():
+        #    #print(f"checking: jobix {jobix} and jobid {ii}")
+        #    #print("Does it exist?", Engine.query.filter_by(jobix=jobix, jobid=ii).first())
+        #    if not Engine.query.filter_by(jobix=jobix, jobid=ii).first():
+        #        # This job does not exist:
+        #        entry = Engine(
+        #                jobix=jobix,
+        #                jobid=ii,
+        #                jobcmd=ids[ii]['jobcmd'],
+        #                jobstage=ids[ii]['jobstage'],
+        #                datecommitted=datetime.datetime.now())
+        #        db.session.add(entry)
+        #        db.session.commit()
+        # Insert into pmdb
+        # assume one or all arrive simultaneously,
+        # but they must be in a list
+        t_now = datetime.datetime.now().strftime(dateformat)
+
+        print("RECEIVED JOBS AND ARE PROCESSING THEM!")
+        print(ids.keys())
+        print(ids['jobid'])
+        print(ids['job'])
+        print(ids['jobtagged'])
+
+        #job = ids['job'] if 'job' in ids else None
+        #jobstage = ids['jobstage'] if 'jobstage' in ids else None
+        #jobdatecommitted = ids['jobdatecommitted'] if 'jobdatecommitted' in ids else None
+        #jobpath = ids['jobpath'] if 'jobpath' in ids else None
+        #jobtagged = ids['jobtagged'] if 'jobtagged' in ids else None
+
+        jobid = ids['jobid']
+        job = [json.dumps(j).encode('utf8') for j in ids['job']]
+        jobstage = [0 for _ in range(len(jobid))]
+        jobpath = [f"{ids['jobpath'][j]}".encode('utf8') for j in range(len(job))]
+        jobdatecommitted = [datetime.datetime.now().strftime(dateformat).encode('utf8') \
+                for _ in range(len(jobid))]
+        jobtagged = [0 for _ in range(len(jobid))]
+
+        status = pmdb.insert(
+                path_in = db_file_.format(jobix=jobix),
+                n_max = len(ids['jobid']),
+                jobid = jobid,
+                job = job,
+                jobstage = jobstage,
+                jobpath = jobpath,
+                jobdatecommitted = jobdatecommitted,
+                jobtagged = jobtagged
+                )
+        # Bad: won't be logged on the server, impossible to debug!
+        #except AttributeError as e:
+        #    abort(400, f"Invalid request to pmdb.insert:  {e}")
+
+        print("ADDED JOBS!")
+        print(status)
+
+        #set_or_update_job_len(jobix, len(job))
+        #bcast_reload()
+        #bcast_jobstage_counter()
 
         print("post accepted!")
         return f"Accepted to {jobix}!"
@@ -170,7 +289,7 @@ def update_job(jobid=None, jobstage=None):
     else:
         abort(403, "jobix must be specified in header!")
 
-    init_db_if_not_existing()
+    init_db_if_not_existing(jobix)
 
     #print("Updated DB")
 
@@ -188,6 +307,9 @@ def update_job(jobid=None, jobstage=None):
         else:
             jobcmd = None
 
+        jobtime = f"{datetime.datetime.now()}".encode("utf8")
+        jobflagged = 0
+
         #print(f"req_fname {req_fname} and filename {filename}")
     else:
         # Not neccessarily so that a job updates filename/job command
@@ -195,32 +317,41 @@ def update_job(jobid=None, jobstage=None):
         jobcmd = None
         #print(f"No filename/command")
 
-    # Alter the corresponding job:
-    job = Engine.query.filter_by(jobix=jobix, jobid=jobid).first()
-    print(f"Found job {job}")
-    if job:
-        job.jobstage = jobstage
-        job.filename = filename or job.filename
-        job.jobcmd = jobcmd or job.jobcmd
-        job.datecommitted=datetime.datetime.now()
-        job.flagged = 0
+    ## Alter the corresponding job:
+    njobs = get_job_len(jobix) 
+    out = pmdb.set(db_file_.format(jobix=jobix), "OK", njobs, jobid,
+            job=jobcmd,
+            jobpath=filename,
+            jobdatecommitted=jobtime,
+            jobflagged=jobflagged)
 
-        #print(f"Committing changes to job {job}")
+    print(f"Altered job, with response from pmdb: {out}")
 
-        # Update entry
-        db.session.commit()
+    #job = Engine.query.filter_by(jobix=jobix, jobid=jobid).first()
+    #print(f"Found job {job}")
+    #if job:
+    #    job.jobstage = jobstage
+    #    job.filename = filename or job.filename
+    #    job.jobcmd = jobcmd or job.jobcmd
+    #    job.datecommitted=datetime.datetime.now()
+    #    job.flagged = 0
 
-        #print(f"Committed change!")
+    #    #print(f"Committing changes to job {job}")
 
-        #print(f"Broadcasting change!")
+    #    # Update entry
+    #    db.session.commit()
 
-        # Broadcast changes to webpage conncetions
-        bcast_change_job(job.jobid,
-                {'jobstage': job.jobstage,
-                 'filename': job.filename,
-                 'datecommitted': job.datecommitted.strftime(dateformat),
-                 'flagged': job.flagged})
-        bcast_jobstage_counter()
+    #    #print(f"Committed change!")
+
+    #    #print(f"Broadcasting change!")
+
+    #    # Broadcast changes to webpage conncetions
+    bcast_change_job(jobid,
+            {'jobstage': jobstage,
+             'filename': filename,
+             'datecommitted': jobtime.decode("utf8"),
+             'flagged': jobflagged})
+    bcast_jobstage_counter()
 
         #print(f"Done with broadcasting!")
 
@@ -242,30 +373,55 @@ def check_stages(old_bad_stage=None, new_redo_stage=None):
     if 'jobix' in request.headers:
         jobix = int(request.headers['jobix'])
 
-        init_db_if_not_existing()
+        init_db_if_not_existing(jobix)
+
+        db = db_file_.format(jobix=jobix)
+        n_jobs = get_job_len()
 
         if old_bad_stage and new_redo_stage:
             # Downgrade jobs that are flagged
             n_bad_jobs = 0
             is_good = check_job_status(jobstage=old_bad_stage, jobix=jobix)
+
             if not is_good:
                 print("Some jobs will be downgraded!")
-                jobs = Engine.query.filter_by(jobstage=old_bad_stage, flagged=1)
-                for j in jobs:
-                    j.datecommitted=datetime.datetime.now()
-                    j.jobstage = new_redo_stage
-                    j.flagged = 0
-                    n_bad_jobs += 1
+                jobs = pmdb.search(db, n_jobs, 
+                        jobstage=('==', old_bad_stage),
+                        jobflagged=('==', 1)
+                        )
 
+                n_bad_jobs = len(jobs)
+                for j in jobs:
+                    t_now = datetime.datetime.now().strftime(dateformat)
+                    pmdb.set(db, "OK", n_jobs, j,
+                            jobstage = new_redo_stage,
+                            jobflagged = 0,
+                            jobdatecommitted=t_now.encode('utf8'),
+                            )
                     # Broadcast changes to webpage conncetions
                     bcast_change_job(j.jobid,
-                            {'datecommitted': j.datecommitted.strftime(dateformat),
-                             'jobstage': j.jobstage,
-                             'flagged': j.flagged})
+                            {'datecommitted': t_now,
+                             'jobstage': jobstage,
+                             'flagged': 0})
                     bcast_jobstage_counter()
 
-                # Update these stages
-                db.session.commit()
+
+            #    jobs = Engine.query.filter_by(jobstage=old_bad_stage, flagged=1)
+            #    for j in jobs:
+            #        j.datecommitted=datetime.datetime.now()
+            #        j.jobstage = new_redo_stage
+            #        j.flagged = 0
+            #        n_bad_jobs += 1
+
+            #        # Broadcast changes to webpage conncetions
+            #        bcast_change_job(j.jobid,
+            #                {'datecommitted': j.datecommitted.strftime(dateformat),
+            #                 'jobstage': j.jobstage,
+            #                 'flagged': j.flagged})
+            #        bcast_jobstage_counter()
+
+            #    # Update these stages
+            #    db.session.commit()
 
             return json.dumps({
                 'Are all simulations within time frame?': is_good,
@@ -290,39 +446,73 @@ def check_stages(old_bad_stage=None, new_redo_stage=None):
 def get_jobs(jobstage=None, nextstage=None):
     """ Returns first available job in `jobstage`
     """
+    try:
+        g.njobs
+    except AttributeError:
+        g.njobs = count_jobs()
 
-    init_db_if_not_existing()
 
     if jobstage is not None:
         # Job list index:
-        jobix = int(request.headers['jobix'])
+        if 'jobix' in request.headers:
+            jobix = int(request.headers['jobix'])
+        else:
+            abort(403, "jobix is missing from headers!")
+
+        init_db_if_not_existing(jobix)
+        db = db_file_.format(jobix=jobix)
+        n_jobs = g.njobs #get_len_jobs(jobix)
+
         # Get the first available job with this jobstage
-        job = Engine.query.filter_by(jobstage=jobstage).first()
-        if job is not None:
-            res = json.dumps({'jobid': job.jobid,
-                              'jobcmd': job.jobcmd,
-                              'jobstage': job.jobstage,
-                              'jobix': job.jobix}).encode("utf8")
-            if nextstage:
-               # Immediately make this job unavailable!
-               job.jobstage = nextstage
-            else:
-               job.jobstage += 1
+        #job = Engine.query.filter_by(jobstage=jobstage).first()
+        job = pmdb.search(db, n_jobs, jobstage=('==',jobstage), only_first=True)
+        # Make it unavailable for other searches right away
+        print(job, "WAS FOUND")
+        if len(job) > 0:
+            pmdb.set(db, n_jobs, job[0],
+                    jobtagged=0,
+                    jobstage=jobstage+1)
 
-            # No longer flagged as bad
-            job.flagged = 0
+            info = pmdb.get(db, n_jobs, job[0])
 
-            # Update the time for comitting at this stage
-            job.datecommitted=datetime.datetime.now()
-
-            db.session.commit()
+            # Goes to worker:
+            res = json.dumps({'jobid': info[0],
+                              'jobcmd': info[1].decode('utf8'),
+                              'jobstage': info[2],
+                              'jobix': jobix}).encode("utf8")
 
             # Broadcast changes to webpage conncetions
-            bcast_change_job(job.jobid,
-                    {'jobstage': job.jobstage,
-                     'flagged': job.flagged})
+            bcast_change_job(job[0],
+                    {'jobstage': jobstage,
+                     'flagged': 0})
             # And percentage/progress bar
             bcast_jobstage_counter()
+
+        #if job is not None:
+        #    res = json.dumps({'jobid': job.jobid,
+        #                      'jobcmd': job.jobcmd,
+        #                      'jobstage': job.jobstage,
+        #                      'jobix': job.jobix}).encode("utf8")
+        #    if nextstage:
+        #       # Immediately make this job unavailable!
+        #       job.jobstage = nextstage
+        #    else:
+        #       job.jobstage += 1
+
+        #    # No longer flagged as bad
+        #    job.flagged = 0
+
+        #    # Update the time for comitting at this stage
+        #    job.datecommitted=datetime.datetime.now()
+
+        ##    db.session.commit()
+
+        #    # Broadcast changes to webpage conncetions
+        #    bcast_change_job(job.jobid,
+        #            {'jobstage': job.jobstage,
+        #             'flagged': job.flagged})
+        #    # And percentage/progress bar
+        #    bcast_jobstage_counter()
 
         else:
             res = json.dumps('nada').encode("utf8")
@@ -336,10 +526,17 @@ def get_jobs(jobstage=None, nextstage=None):
         nstages = count_stages()
         ncomplete = count_jobs(nstages)
 
+        if len(glob.glob("*.pmem")) > 0:
+            jobix_ = int(glob.glob(db_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
+            db_ = db_file_.format(jobix=jobix_)
+        else:
+            db_ = None
+
         # set some global variables
         g.njobs = njobs
         g.nstages = nstages
         g.ncomplete = ncomplete
+        g.db = db_
 
         alljobs = []
 
@@ -348,20 +545,42 @@ def get_jobs(jobstage=None, nextstage=None):
             noddstages = nstages//2 + nstages%2
             for i in range(noddstages):
                 iodd = 2*i + 1
-                odd_jobs = Engine.query.filter_by(jobstage=iodd)
-                # add these to the web page list
+                #odd_jobs = Engine.query.filter_by(jobstage=iodd)
+                odd_jobs = pmdb.search(db_, njobs,
+                        jobstage=("==", iodd),
+                        )
+                # add these indices to the web page list
                 alljobs.extend(odd_jobs)
         else:
-            alljobs = Engine.query.all()
+            #alljobs = Engine.query.all()
+            alljobs = range(njobs)
 
-        # Find their indices:
+        #for job in alljobs:
+        #    #jobs_on_webpage.append(job.jobid)
+        #    if job not in jobs_on_webpage:
+        #        jobs_on_webpage.append(job)
+        
+        # From the indices, get the jobs, returned like this:
+        # [0, b'[12, 34]', 8, b'a_special_path!', b'2018-05-02 18:11:12', 0]
+
+        jobdictlist = []
         for job in alljobs:
-            jobs_on_webpage.append(job.jobid)
+            res = pmdb.get(g.db, g.njobs, job)
+            jobdictlist.append( {
+                'jobid': res[0],
+                'jobstage': res[2],
+                'filename': res[3],
+                'flagged': res[5],
+                'datecommitted': res[4],
+                })
+
+
 
         check_job_status()
         jobcount = bcast_jobstage_counter()
         return render_template('joblist.html',
-                jobs=alljobs,
+                #jobs=alljobs,
+                jobs=jobdictlist,
                 njobs=njobs, ncomplete=ncomplete, nstages=nstages,
                 jobcount=jobcount)
 
@@ -377,31 +596,51 @@ def set_lifetime(jobstage=None, n_minutes=None):
     """ Sets the lifetime a job can have in a jobstage
     """
 
-    init_db_if_not_existing()
 
     if jobstage and n_minutes:
         # Set a lifetime
-        jobix = int(request.headers['jobix'])
-        # Check if they already have been set
-        res = Lifetime.query.filter_by(jobstage=jobstage).first()
-        if not res:
-            entry = Lifetime(
-                    jobix = jobix,
-                    jobstage = jobstage,
-                    lifetime = n_minutes
-                    )
+        # Job list index:
+        if 'jobix' in request.headers:
+            jobix = int(request.headers['jobix'])
         else:
-            res.lifetime = datetime.time(0,int(lifetime))
-        db.session.commit()
+            abort(403, "jobix is missing from headers!")
+
+        init_db_if_not_existing(jobix)
+
+        # Check if they already have been set
+        #res = Lifetime.query.filter_by(jobstage=jobstage).first()
+        #if not res:
+        #    entry = Lifetime(
+        #            jobix = jobix,
+        #            jobstage = jobstage,
+        #            lifetime = n_minutes
+        #            )
+        #else:
+        #    res.lifetime = datetime.time(0,int(lifetime))
+        #db.session.commit()
+        update_lifetimes(jobix, jobstage, n_minutes)
+
 
     elif jobstage:
         # Get lifetime for this job stage
-        res = Lifetime.query.filter_by(jobstage=jobstage).first()
-        return res
+        #res = Lifetime.query.filter_by(jobstage=jobstage).first()
+        if len(glob.glob("*.pmem")) > 0:
+            jobix_ = int(glob.glob(db_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
+            res = get_lifetimes(jobix_)
+        else:
+            res = []
+        return res[0]
     else:
         # Return HTML page showing current lifetimes
-        alltimes = Lifetime.query.all()
-        return render_template('lifetimes.html', lifetimes=alltimes)
+        #alltimes = Lifetime.query.all()
+        if len(glob.glob("*.pmem")) > 0:
+            jobix_ = int(glob.glob(db_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
+            lifetimes = get_lifetimes(jobix_)
+        else:
+            lifetimes = [] 
+        out = [{'jobstage':i, 'lifetime':lifetimes[i]} for i in range(len(lifetimes))]
+
+        return render_template('lifetimes.html', lifetimes=out)
 
 """
 "
@@ -413,17 +652,56 @@ def count_jobs(jobstage=None):
         a given jobstage or them all
     """
 
-    if jobstage is not None:
-        extra = f"WHERE jobstage = {jobstage};"
-    else:
-        extra = ";"
-    query = db.engine.execute(f"""
-        SELECT count(*)
-        FROM engine
-        {extra}
-        """).first()
-    print(f"Found n_jobs: {query[0]} with jobstage: {jobstage}")
-    return int(query[0])
+    print("IN COUNT_JOBS")
+
+    # ask db:
+    njobs = 0
+    if len(glob.glob("*.pmem")) > 0:
+        jobix_ = int(glob.glob(db_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
+        db = db_file_.format(jobix=jobix_)
+
+        if not jobstage:
+            njobs = pmdb.count(db)[0]
+            g.njobs = njobs
+        else:
+            njobs = pmdb.count(db)[0]
+            g.njobs = njobs
+            jobs = pmdb.search(db, njobs, jobstage=('==', jobstage))
+            njobs = len(jobs)
+
+    print("DONE IN COUNT_JOBS")
+
+    ## Will have to do a hack:
+    #if len(glob.glob("*.pmem")) > 0:
+    #    jobix_ = int(glob.glob(db_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
+    #    db = db_file_.format(jobix=jobix_)
+
+    #    n_jobs = get_job_len(jobix_)
+
+    #    print(f" WE HAVE n_jobs= {n_jobs} and are going to look for more AT STAGE {jobstage} ")
+
+    #    if jobstage and n_jobs:
+    #        valid_jobs = pmdb.search(db, n_jobs, jobstage=('==', jobstage))
+    #        n_jobs = len(valid_jobs)
+    #else :
+    #    n_jobs = 0
+        
+
+    print(f"Found n jobs: {njobs} with jobstage = {jobstage} ")
+
+    return njobs
+
+    #if jobstage is not None:
+    #    extra = f"WHERE jobstage = {jobstage};"
+    #else:
+    #    extra = ";"
+    #query = db.engine.execute(f"""
+    #    SELECT count(*)
+    #    FROM engine
+    #    {extra}
+    #    """).first()
+    #print(f"Found n_jobs: {query[0]} with jobstage: {jobstage}")
+    #return int(query[0])
 
 """
 "
@@ -433,11 +711,20 @@ def count_jobs(jobstage=None):
 def count_stages():
     """ Counts number of job stages
     """
-    lifetimes = Lifetime.query.all()
-    max_stage = -1
+    #lifetimes = Lifetime.query.all()
+    #max_stage = -1
 
-    for lt in lifetimes:
-        max_stage = lt.jobstage if lt.jobstage > max_stage else max_stage
+    #for lt in lifetimes:
+    #    max_stage = lt.jobstage if lt.jobstage > max_stage else max_stage
+
+    # Will have to do a hack:
+    if len(glob.glob("*.pmem")) > 0:
+        jobix_ = int(glob.glob(db_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
+        lifetimes = get_lifetimes(jobix_)
+    else :
+        lifetimes = []
+
+    max_stage = len(lifetimes)
 
     print(f"Found max_stage: {max_stage}")
     return max_stage
@@ -453,30 +740,54 @@ def count_stages():
 def check_job_status(jobstage=None, jobix=None):
     isgood = 1
     # Return status code of jobs
+    #jobs = Engine.query.filter_by(jobstage=jobstage)
+
+    db = db_file_.format(jobix=jobix),
+    n_jobs = get_job_len(jobix),
+
+
     if jobstage:
-        jobs = Engine.query.filter_by(jobstage=jobstage)
+        jobs = pmdb.search(
+                db,
+                n_jobs,
+                jobstage=("==", jobstage) if jobstage else None,
+                #jobflagged=("==", 1),
+                )
     else:
-        jobs = Engine.query.all()
+        # No need to do a potentially heavy search
+        jobs = range(get_job_len(jobix))
 
     t_now = datetime.datetime.now()
+    lifetimes = get_lifetimes(jobix)
+
     for j in jobs:
-        j_stage = j.jobstage
-        t_then = j.datecommitted
-        if jobix:
-            q = Lifetime.query.filter_by(jobix=jobix, jobstage=j_stage).first()
-        else:
-            q = Lifetime.query.filter_by(jobstage=j_stage).first()
-        #print("RESULT:", q, 'for jobstage', j_stage)
-        if q and q.lifetime:
-            if t_now - t_then > datetime.timedelta(minutes=q.lifetime):
-                # Turn into negative
-                isgood *= 0
-                j.flagged = 1
-        else:
-            isgood += 100
-            #print(f"WARNING! No maximum time has been set for stage {j_stage}!")
+        #j_stage = j.jobstage
+        #t_then = j.datecommitted
+        #if jobix:
+        #    q = Lifetime.query.filter_by(jobix=jobix, jobstage=j_stage).first()
+        #else:
+        #    q = Lifetime.query.filter_by(jobstage=j_stage).first()
+        ##print("RESULT:", q, 'for jobstage', j_stage)
+        #if q and q.lifetime:
+        #    if t_now - t_then > datetime.timedelta(minutes=q.lifetime):
+        #        # Turn into negative
+        #        isgood *= 0
+        #        j.flagged = 1
+        #else:
+        #    isgood += 100
+        #    #print(f"WARNING! No maximum time has been set for stage {j_stage}!")
+        # Check if time stamps and lifetimes work out
+        job_data = pmdb.get(db, "OK", n_jobs, j)
+        j_stage = job_data[2]
+        t_then = datetime.datetime.strptime(job_data[4], dateformat) 
+        if t_now - t_then > datetime.timedelta(minutes=lifetimes[j_stage]):
+            isgood *= 0
+            # Update value of job
+            pmdb.set(db, "OK", n_jobs, j, 
+                    jobflagged=1)
+        
     # Update flags
-    db.session.commit()
+    # db.session.commit()
 
     return isgood
 
@@ -486,22 +797,30 @@ def check_job_status(jobstage=None, jobix=None):
 "
 """
 
-def init_db_if_not_existing():
-    jlist = 'joblist.db'
-    lives = 'lifetimes.db'
-    if not os.path.exists(jlist) or os.stat(jlist).st_size ==0:
-        # Initialize DB
-        #from . import db
-        if os.path.exists(jlist): os.remove(jlist)
-        db.create_all()
-    else:
-        # Check if all desired columns exist
-        pass
+def init_db_if_not_existing(jobix):
+    #jlist = 'joblist.db'
+    #lives = 'lifetimes.db'
+    jlist = db_file_.format(jobix=jobix)
+    lives = lt_file_.format(jobix=jobix)
 
-    if not os.path.exists(lives) or os.stat(lives).st_size ==0:
-        # initialize lifetime DB
-        if os.path.exists(lives): os.remove(lives)
-        db.create_all(bind='lifetimes')
+    print("Attempting to connect to db file...")
+    status = pmdb.init_pmdb(jlist)
+    print("Initialized or connected to database")
+    print(f"N existing elements: {status[0]} and init message: {status[1]}")
+
+    #if not os.path.exists(jlist) or os.stat(jlist).st_size ==0:
+    #    # Initialize DB
+    #    #from . import db
+    #    if os.path.exists(jlist): os.remove(jlist)
+    #    db.create_all()
+    #else:
+    #    # Check if all desired columns exist
+    #    pass
+
+    #if not os.path.exists(lives) or os.stat(lives).st_size ==0:
+    #    # initialize lifetime DB
+    #    if os.path.exists(lives): os.remove(lives)
+    #    db.create_all(bind='lifetimes')
 
     return 'ok'
 
