@@ -293,6 +293,11 @@ def update_job(jobid=None, jobstage=None):
 
     #print("Updated DB")
 
+    job = None
+    filename =  None
+    jobtime = f"{datetime.datetime.now().strftime(dateformat)}".encode("utf8")
+    jobtagged = -1
+
     if request.method == 'POST':
         # We could receive both a save path and a new unpickleable job command
         # that the worker for the next step can use for its
@@ -307,8 +312,7 @@ def update_job(jobid=None, jobstage=None):
         else:
             jobcmd = None
 
-        jobtime = f"{datetime.datetime.now()}".encode("utf8")
-        jobflagged = 0
+        jobtagged = 0
 
         #print(f"req_fname {req_fname} and filename {filename}")
     else:
@@ -317,13 +321,17 @@ def update_job(jobid=None, jobstage=None):
         jobcmd = None
         #print(f"No filename/command")
 
+
     ## Alter the corresponding job:
     njobs = get_job_len(jobix) 
-    out = pmdb.set(db_file_.format(jobix=jobix), "OK", njobs, jobid,
+    print(f"SPECIFYING JOBID= {jobid}")
+    out = pmdb.set(db_file_.format(jobix=jobix), njobs,
+            jobid=jobid,
             job=jobcmd,
+            jobstage=jobstage,
             jobpath=filename,
             jobdatecommitted=jobtime,
-            jobflagged=jobflagged)
+            jobtagged=jobtagged)
 
     print(f"Altered job, with response from pmdb: {out}")
 
@@ -350,7 +358,7 @@ def update_job(jobid=None, jobstage=None):
             {'jobstage': jobstage,
              'filename': filename,
              'datecommitted': jobtime.decode("utf8"),
-             'flagged': jobflagged})
+             'flagged': jobtagged})
     bcast_jobstage_counter()
 
         #print(f"Done with broadcasting!")
@@ -387,15 +395,15 @@ def check_stages(old_bad_stage=None, new_redo_stage=None):
                 print("Some jobs will be downgraded!")
                 jobs = pmdb.search(db, n_jobs, 
                         jobstage=('==', old_bad_stage),
-                        jobflagged=('==', 1)
+                        jobtagged=('==', 1)
                         )
 
                 n_bad_jobs = len(jobs)
                 for j in jobs:
                     t_now = datetime.datetime.now().strftime(dateformat)
-                    pmdb.set(db, "OK", n_jobs, j,
+                    pmdb.set(db, n_jobs, j,
                             jobstage = new_redo_stage,
-                            jobflagged = 0,
+                            jobtagged = 0,
                             jobdatecommitted=t_now.encode('utf8'),
                             )
                     # Broadcast changes to webpage conncetions
@@ -469,13 +477,22 @@ def get_jobs(jobstage=None, nextstage=None):
         # Make it unavailable for other searches right away
         print(job, "WAS FOUND")
         if len(job) > 0:
-            pmdb.set(db, n_jobs, job[0],
+            print(f"SETTING VALUE (TAKEN) out of {n_jobs}, jobid {job[0]}, jobstage {int(jobstage+1)}")
+            pmdb.set(db,
+                    n_jobs, 
+                    jobid=job[0],
+                    job=None,
+                    jobstage=int(jobstage+1),
+                    jobpath=None,
+                    jobdatecommitted=None,
                     jobtagged=0,
-                    jobstage=jobstage+1)
+                    )
 
+            print("GETTING VALUES (INFO) ")
             info = pmdb.get(db, n_jobs, job[0])
 
             # Goes to worker:
+            print("RETURNS VALUES (TO WORKER) ")
             res = json.dumps({'jobid': info[0],
                               'jobcmd': info[1].decode('utf8'),
                               'jobstage': info[2],
@@ -647,7 +664,7 @@ def set_lifetime(jobstage=None, n_minutes=None):
 " count_jobs
 "
 """
-def count_jobs(jobstage=None):
+def count_jobs(jobstage=-1):
     """ Counts number of jobs with
         a given jobstage or them all
     """
@@ -660,14 +677,16 @@ def count_jobs(jobstage=None):
         jobix_ = int(glob.glob(db_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
         db = db_file_.format(jobix=jobix_)
 
-        if not jobstage:
+        if jobstage == -1:
             njobs = pmdb.count(db)[0]
             g.njobs = njobs
         else:
+            print(f"COUNTING JOBS IN STAGE {jobstage} ")
             njobs = pmdb.count(db)[0]
             g.njobs = njobs
             jobs = pmdb.search(db, njobs, jobstage=('==', jobstage))
             njobs = len(jobs)
+            print(f"Found {jobs} with len {njobs}")
 
     print("DONE IN COUNT_JOBS")
 
@@ -751,7 +770,7 @@ def check_job_status(jobstage=None, jobix=None):
                 db,
                 n_jobs,
                 jobstage=("==", jobstage) if jobstage else None,
-                #jobflagged=("==", 1),
+                #jobtagged=("==", 1),
                 )
     else:
         # No need to do a potentially heavy search
@@ -777,14 +796,14 @@ def check_job_status(jobstage=None, jobix=None):
         #    isgood += 100
         #    #print(f"WARNING! No maximum time has been set for stage {j_stage}!")
         # Check if time stamps and lifetimes work out
-        job_data = pmdb.get(db, "OK", n_jobs, j)
+        job_data = pmdb.get(db, n_jobs, j)
         j_stage = job_data[2]
         t_then = datetime.datetime.strptime(job_data[4], dateformat) 
         if t_now - t_then > datetime.timedelta(minutes=lifetimes[j_stage]):
             isgood *= 0
             # Update value of job
-            pmdb.set(db, "OK", n_jobs, j, 
-                    jobflagged=1)
+            pmdb.set(db, n_jobs, j, 
+                    jobtagged=1)
         
     # Update flags
     # db.session.commit()
@@ -849,6 +868,7 @@ def bcast_jobstage_counter():
 
     # Enumerate through each stage and find the corresponding number of jobs
     stagejobs['count'] = [count_jobs(i) for i in range(g.nstages + 1)]
+
 
     # Broadcast this newly obtained list
     socketio.emit('counted jobs in stages', stagejobs, broadcast=True)
