@@ -13,8 +13,7 @@ div.stagebar_column {
     background: #e0e0e0;
     color: #0277bd;
     text-align: center;
-    vertical-align: middle;
-    height: 1.5em;
+    line-height: 2em;
 }
 
 {% endblock %}
@@ -76,7 +75,11 @@ div.stagebar_column {
 
             var bars = percents.map(function(pc, ix) {
                 bar = document.getElementById("stagebar " + ix);
-                bar.style = "width: " + pc + "%";
+                if (pc==0) {
+                  bar.style = "width: 5%; background: #f8f8f8; border: 1px solid #e0e0e0; box-sizing: border-box;";
+                } else {
+                  bar.style = "width: " + Math.max(pc,5) + "%";
+                }
                 bar.innerHTML = stagejobs['count'][ix];
                 return 0;
             });
@@ -102,13 +105,13 @@ div.stagebar_column {
         var value;
         var old_value;
         for (var key in job){
-            //console.log(key);
-            if (!job[key]) {
+            console.log(key);
+            if (job[key]==="") {
                 value = '-';
             } else {
                 value = job[key];
             }
-            //console.log('value for key', key, 'is', value);
+            console.log('value for key', key, 'is', value);
             var entry = document.getElementById(key + " " + job["jobid"]);
             if (entry && key == "flagged") {
                 // Determine if this object must be moved
@@ -142,8 +145,8 @@ div.stagebar_column {
 
 {% block body %}
 <div class="row">
-<div class="col-sm-11"><h2>Status of all jobs</h2></div>
-<div id="progress_percent" class="col-sm-1" style="text-align: right"><h2> 0% </h2></div>
+<div class="col-sm-10"><h2>Status of all jobs</h2></div>
+<div id="progress_percent" class="col-sm-2" style="text-align: right"><h2> 0% </h2></div>
 </div>
 <progress id="progress_total" value="0" max="100"></progress>
 <div class="row">

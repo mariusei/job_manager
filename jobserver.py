@@ -231,9 +231,10 @@ def set_jobs():
 
         print("RECEIVED JOBS AND ARE PROCESSING THEM!")
         print(ids.keys())
-        print(ids['jobid'])
-        print(ids['job'])
-        print(ids['jobtagged'])
+
+        #print(ids['jobid'])
+        #print(ids['job'])
+        #print(ids['jobtagged'])
 
         #job = ids['job'] if 'job' in ids else None
         #jobstage = ids['jobstage'] if 'jobstage' in ids else None
@@ -243,11 +244,23 @@ def set_jobs():
 
         jobid = ids['jobid']
         job = [json.dumps(j).encode('utf8') for j in ids['job']]
-        jobstage = [0 for _ in range(len(jobid))]
-        jobpath = [f"{ids['jobpath'][j]}".encode('utf8') for j in range(len(job))]
-        jobdatecommitted = [datetime.datetime.now().strftime(dateformat).encode('utf8') \
+        if 'jobstage' in ids:
+            jobstage = [int(j) for j in ids['jobstage']]
+        else:
+            jobstage = [0 for _ in range(len(jobid))]
+        if 'jobpath' in ids:
+            jobpath = [f"{ids['jobpath'][j]}".encode('utf8') for j in range(len(job))]
+        else:
+            jobpath = ["".encode('utf8') for _ in range(len(job))]
+        if 'jobdatecommitted' in ids:
+            jobpath = [f"{ids['jobdatecommitted'][j]}".encode('utf8') for j in range(len(job))]
+        else:
+            jobdatecommitted = [datetime.datetime.now().strftime(dateformat).encode('utf8') \
                 for _ in range(len(jobid))]
-        jobtagged = [0 for _ in range(len(jobid))]
+        if 'jobtagged' in ids:
+            jobstage = [int(j) for j in ids['jobtagged']]
+        else:
+            jobtagged = [0 for _ in range(len(jobid))]
 
         status = pmdb.insert(
                 path_in = db_file_.format(jobix=jobix),
@@ -305,8 +318,9 @@ def update_job(jobid=None, jobstage=None):
         req = json.loads(zlib.decompress(request.data))
         if 'filename' in req:
             filename = req['filename'].encode("utf8")
+            fn_screen = filename.decode('utf8')
         else:
-            filenae = None
+            filename = None
         if 'jobcmd' in req:
             jobcmd = req['jobcmd']
         else:
@@ -356,7 +370,7 @@ def update_job(jobid=None, jobstage=None):
     #    # Broadcast changes to webpage conncetions
     bcast_change_job(jobid,
             {'jobstage': jobstage,
-             'filename': filename,
+             'filename': fn_screen,
              'datecommitted': jobtime.decode("utf8"),
              'flagged': jobtagged})
     bcast_jobstage_counter()
@@ -384,7 +398,7 @@ def check_stages(old_bad_stage=None, new_redo_stage=None):
         init_db_if_not_existing(jobix)
 
         db = db_file_.format(jobix=jobix)
-        n_jobs = get_job_len()
+        n_jobs = get_job_len(jobix)
 
         if old_bad_stage and new_redo_stage:
             # Downgrade jobs that are flagged
@@ -475,9 +489,9 @@ def get_jobs(jobstage=None, nextstage=None):
         #job = Engine.query.filter_by(jobstage=jobstage).first()
         job = pmdb.search(db, n_jobs, jobstage=('==',jobstage), only_first=True)
         # Make it unavailable for other searches right away
-        print(job, "WAS FOUND")
+        #print(job, "WAS FOUND")
         if len(job) > 0:
-            print(f"SETTING VALUE (TAKEN) out of {n_jobs}, jobid {job[0]}, jobstage {int(jobstage+1)}")
+            #print(f"SETTING VALUE (TAKEN) out of {n_jobs}, jobid {job[0]}, jobstage {int(jobstage+1)}")
             pmdb.set(db,
                     n_jobs, 
                     jobid=job[0],
@@ -500,7 +514,7 @@ def get_jobs(jobstage=None, nextstage=None):
 
             # Broadcast changes to webpage conncetions
             bcast_change_job(job[0],
-                    {'jobstage': jobstage,
+                    {'jobstage': jobstage+1,
                      'flagged': 0})
             # And percentage/progress bar
             bcast_jobstage_counter()
@@ -559,23 +573,26 @@ def get_jobs(jobstage=None, nextstage=None):
 
         if njobs > 1024:
             # Too many jobs!
-            noddstages = nstages//2 + nstages%2
-            for i in range(noddstages):
-                iodd = 2*i + 1
-                #odd_jobs = Engine.query.filter_by(jobstage=iodd)
-                odd_jobs = pmdb.search(db_, njobs,
-                        jobstage=("==", iodd),
-                        )
-                # add these indices to the web page list
-                alljobs.extend(odd_jobs)
+            #noddstages = nstages//2 + nstages%2
+            #for i in range(noddstages):
+            #    iodd = 2*i + 1
+            #    #odd_jobs = Engine.query.filter_by(jobstage=iodd)
+            #    odd_jobs = pmdb.search(db_, njobs,
+            #            jobstage=("==", iodd),
+            #            )
+            #    # add these indices to the web page list
+            #    alljobs.extend(odd_jobs)
+            # Add 100 representative jobs
+            alljobs = range(0,njobs,njobs//100)
+
         else:
             #alljobs = Engine.query.all()
             alljobs = range(njobs)
 
-        #for job in alljobs:
-        #    #jobs_on_webpage.append(job.jobid)
-        #    if job not in jobs_on_webpage:
-        #        jobs_on_webpage.append(job)
+        for job in alljobs:
+            #jobs_on_webpage.append(job.jobid)
+            if job not in jobs_on_webpage:
+                jobs_on_webpage.append(job)
         
         # From the indices, get the jobs, returned like this:
         # [0, b'[12, 34]', 8, b'a_special_path!', b'2018-05-02 18:11:12', 0]
@@ -588,7 +605,7 @@ def get_jobs(jobstage=None, nextstage=None):
                 'jobstage': res[2],
                 'filename': res[3],
                 'flagged': res[5],
-                'datecommitted': res[4],
+                'datecommitted': res[4].decode('utf8'),
                 })
 
 
@@ -669,7 +686,7 @@ def count_jobs(jobstage=-1):
         a given jobstage or them all
     """
 
-    print("IN COUNT_JOBS")
+    #print("IN COUNT_JOBS")
 
     # ask db:
     njobs = 0
@@ -681,14 +698,14 @@ def count_jobs(jobstage=-1):
             njobs = pmdb.count(db)[0]
             g.njobs = njobs
         else:
-            print(f"COUNTING JOBS IN STAGE {jobstage} ")
+            #print(f"COUNTING JOBS IN STAGE {jobstage} ")
             njobs = pmdb.count(db)[0]
             g.njobs = njobs
             jobs = pmdb.search(db, njobs, jobstage=('==', jobstage))
             njobs = len(jobs)
-            print(f"Found {jobs} with len {njobs}")
+            #print(f"Found {jobs} with len {njobs}")
 
-    print("DONE IN COUNT_JOBS")
+    #print("DONE IN COUNT_JOBS")
 
     ## Will have to do a hack:
     #if len(glob.glob("*.pmem")) > 0:
@@ -887,7 +904,9 @@ def bcast_change_job(jobid=None, jobkw=None):
         to all connected clients
         which will update the relevant tags
     """
+    #print("IN BCAST_CHANGE_JOB")
     if jobkw:
+        #print("FOUND KW")
         if jobid in jobs_on_webpage:
             data_out = {'jobid':jobid, **jobkw}
             #data_out = json.dumps(data_out_dict).encode('utf8')
