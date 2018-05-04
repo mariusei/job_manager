@@ -34,7 +34,7 @@ div.stagebar_column {
     function set_percentage(){
         percent_count = document.getElementById("progress_percent");
         percent_bar = document.getElementById("progress_total");
-        //console.log("Estimating percentage: with ncomplete", ncomplete, "njobs:", njobs, "and counts", stagejobs);
+        console.log("Estimating percentage: with ncomplete", ncomplete, "njobs:", njobs, "and counts", stagejobs);
         if (ncomplete > 0) {
             percent = parseInt(100.0 * ncomplete / njobs);
         } else {
@@ -67,11 +67,13 @@ div.stagebar_column {
         njobs = stagejobs['ntot']
         var nstages = stagejobs['nstages']
         var bar;
-        //console.log("setting stagebars...", njobs , nstages);
+        console.log("setting stagebars...", njobs , nstages);
         if (njobs > 0) {
             var percents = stagejobs['count'].map(function(n) {
                 return percent = 100.0*n / njobs;
             });
+
+            console.log("percents: ", percents);
 
             var bars = percents.map(function(pc, ix) {
                 bar = document.getElementById("stagebar " + ix);
@@ -89,7 +91,7 @@ div.stagebar_column {
 
     socket.on("counted jobs in stages", function(count){
         // Update global variable stagejobs
-        //console.log("counted jobs in stages", count);
+        console.log("counted jobs in stages", count);
         stagejobs = count;
         ncomplete = count['count'][count['count'].length-1]
         set_stagebars();
@@ -145,14 +147,14 @@ div.stagebar_column {
 
 {% block body %}
 <div class="row">
-<div class="col-sm-10"><h2>Status of all jobs</h2></div>
-<div id="progress_percent" class="col-sm-2" style="text-align: right"><h2> 0% </h2></div>
+<div class="col-sm-8"><h2>Status of all jobs</h2></div>
+<div id="progress_percent" class="col-sm-4" style="text-align: right"><h2> 0% </h2></div>
 </div>
 <progress id="progress_total" value="0" max="100"></progress>
 <div class="row">
 <div class="stagebar_wrapper">
-    {% for stage in range(nstages+1) %}
-    <div class="stagebar_column" id="stagebar {{ stage }}" style="width: {{ 100/(nstages+1)}}%">{{ stage }}</div>
+    {% for stage in range(nstages) %}
+    <div class="stagebar_column" id="stagebar {{ stage }}" style="width: {{ 100/(nstages)}}%">{{ stage }}</div>
     {% endfor %}
 </div>
 </div>

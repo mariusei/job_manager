@@ -25,9 +25,9 @@ socketio = SocketIO(app)
 #app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 dateformat = "%Y-%m-%d %H:%M:%S"
-lt_file_ = "lifetimes_{jobix}.json"
-db_file_ = "database_{jobix}.pmem"
-job_len_file_ = "joblen_{jobix}.json"
+lt_file_ = "/gaia/status/lifetimes_{jobix}.json"
+db_file_ = "/mnt/pmemdir/gaia/database_{jobix}.pmem"
+job_len_file_ = "/gaia/status/joblen_{jobix}.json"
 
 # List of jobs that have been pushed to web page
 jobs_on_webpage = []
@@ -482,7 +482,9 @@ def get_jobs(jobstage=None, nextstage=None):
     if g.isworking:
         return json.dumps("busy").encode("utf8")
 
+    #print("Counting jobs in /get!")
     g.njobs = count_jobs()
+    #print(f"Found {g.njobs} in /get")
 
 
     if jobstage is not None:
@@ -568,7 +570,7 @@ def get_jobs(jobstage=None, nextstage=None):
         nstages = count_stages()
         ncomplete = count_jobs(nstages)
 
-        if len(glob.glob("*.pmem")) > 0:
+        if len(glob.glob(db_file_.replace("{jobix}","*"))) > 0:
             jobix_ = int(glob.glob(db_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
             db_ = db_file_.format(jobix=jobix_)
         else:
@@ -673,7 +675,7 @@ def set_lifetime(jobstage=None, n_minutes=None):
     elif jobstage:
         # Get lifetime for this job stage
         #res = Lifetime.query.filter_by(jobstage=jobstage).first()
-        if len(glob.glob("*.pmem")) > 0:
+        if len(glob.glob(db_file_.replace("{jobix}","*"))) > 0:
             jobix_ = int(glob.glob(db_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
             res = get_lifetimes(jobix_)
         else:
@@ -682,7 +684,7 @@ def set_lifetime(jobstage=None, n_minutes=None):
     else:
         # Return HTML page showing current lifetimes
         #alltimes = Lifetime.query.all()
-        if len(glob.glob("*.pmem")) > 0:
+        if len(glob.glob(db_file_.replace("{jobix}","*"))) > 0:
             jobix_ = int(glob.glob(db_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
             lifetimes = get_lifetimes(jobix_)
         else:
@@ -706,7 +708,7 @@ def count_jobs(jobstage=-1):
     # ask db:
 
     njobs = 0
-    if len(glob.glob("*.pmem")) > 0:
+    if len(glob.glob(db_file_.replace("{jobix}","*"))) > 0:
         jobix_ = int(glob.glob(db_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
         db = db_file_.format(jobix=jobix_)
 
@@ -739,7 +741,7 @@ def count_jobs(jobstage=-1):
     #    n_jobs = 0
         
 
-    print(f"Found n jobs: {njobs} with jobstage = {jobstage} ")
+    #print(f"Found n jobs: {njobs} with jobstage = {jobstage} ")
 
     return njobs
 
@@ -770,7 +772,7 @@ def count_stages():
     #    max_stage = lt.jobstage if lt.jobstage > max_stage else max_stage
 
     # Will have to do a hack:
-    if len(glob.glob("*.pmem")) > 0:
+    if len(glob.glob(db_file_.replace("{jobix}","*"))) > 0:
         jobix_ = int(glob.glob(db_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
         lifetimes = get_lifetimes(jobix_)
     else :
@@ -778,7 +780,7 @@ def count_stages():
 
     max_stage = len(lifetimes)
 
-    print(f"Found max_stage: {max_stage}")
+    #print(f"Found max_stage: {max_stage}")
     return max_stage
 
 
@@ -890,17 +892,21 @@ def bcast_jobstage_counter():
         g.nstages
     except AttributeError:
         g.nstages = count_stages()
-    try:
-        g.njobs
-    except AttributeError:
-        g.njobs = count_jobs()
+    #try:
+    #    g.njobs
+    #except AttributeError:
+    #    g.njobs = count_jobs()
 
     stagejobs = dict()
-    stagejobs['ntot'] = g.njobs
-    stagejobs['nstages'] = g.nstages
-
+    #stagejobs['ntot'] = g.njobs
     # Enumerate through each stage and find the corresponding number of jobs
-    stagejobs['count'] = [count_jobs(i) for i in range(g.nstages + 1)]
+    stagejobs['count'] = [count_jobs(i) for i in range(g.nstages)]
+    stagejobs['nstages'] = g.nstages
+    njobs = 0
+    for i in range(g.nstages):
+      njobs += stagejobs['count'][i]
+    stagejobs['ntot'] = njobs
+
 
 
     # Broadcast this newly obtained list
