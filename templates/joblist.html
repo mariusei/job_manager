@@ -105,13 +105,13 @@ div.stagebar_column {
         var value;
         var old_value;
         for (var key in job){
-            console.log(key);
+            //console.log(key);
             if (job[key]==="") {
                 value = '-';
             } else {
                 value = job[key];
             }
-            console.log('value for key', key, 'is', value);
+            //console.log('value for key', key, 'is', value);
             var entry = document.getElementById(key + " " + job["jobid"]);
             if (entry && key == "flagged") {
                 // Determine if this object must be moved

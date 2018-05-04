@@ -73,31 +73,23 @@ def update_lifetimes(jobix, stage, lifetime):
     return lts
 
 
-#class Engine(db.Model):
-#    # Authentication needed to look up entries
-#    jobix = db.Column(db.Integer)
-#    # Job IDs
-#    jobid = db.Column(db.Integer, primary_key=True)
-#    # Jobs, this is the instruction
-#    jobcmd = db.Column(db.PickleType)
-#    # Job stage: user can request jobs to be moved between stages
-#    jobstage = db.Column(db.Integer)
-#    # Job commitment time: a job could die, meaning it should be degraded
-#    # and made available for workers
-#    datecommitted = db.Column(db.DateTime)
-#    # If the job has surpassed its allocated time:
-#    flagged = db.Column(db.Integer)
-#    # Filnames for last output
-#    filename = db.Column(db.String)
-#
-#class Lifetime(db.Model):
-#    __bind_key__ = 'lifetimes'
-#    # Combines: jobix, jobstage and lifetime
-#    id = db.Column(db.Integer, autoincrement=True, primary_key=True)
-#    jobix = db.Column(db.Integer)
-#    jobstage = db.Column(db.Integer)
-#    lifetime = db.Column(db.Integer) # minutes
+"""
+"
+" init
+"
+"""
+def init():
+    """ Checks if 'globals' have been defined
+    """
+    try:
+        g.njobs
+    except AttributeError:
+        g.njobs = 0
 
+    try:
+        g.isworking
+    except AttributeError:
+        g.isworking = False
 
 
 """
@@ -110,6 +102,7 @@ def hello():
     # Initialize files if they don't exist
     # and have data
     #init_db_if_not_existing()
+    init()
     return "Hello World!"
 
 """
@@ -127,12 +120,14 @@ def init_ix(stage_times=None):
 
         0 lifetime indicates infinity
     """
+    init()
+
     if 'jobix' in request.headers:
         jobix = int(request.headers['jobix'])
     else:
         abort(403, "jobix is missing from headers!")
 
-    if stage_times:
+    if stage_times and not g.isworking:
         lifetimes = stage_times.split('/')
         n_stages = len(lifetimes)
 
@@ -174,7 +169,7 @@ def init_ix(stage_times=None):
         bcast_reload()
         bcast_jobstage_counter()
         return lts_new
-    else:
+    elif not stage_times and not g.isworking:
         # Reload web pages
         bcast_reload()
         bcast_jobstage_counter()
@@ -187,6 +182,9 @@ def init_ix(stage_times=None):
 
         #return json.dumps(Lifetime.query.all()).encode("utf8")
         return json.dumps(lts).encode("utf8")
+    
+    else:
+        return json.dumps("busy").encode("utf8")
 
 """
 "
@@ -201,29 +199,22 @@ def set_jobs():
         json dictionary.
     """
 
+    init()
+
+    if g.isworking:
+        return json.dumps("busy").encode("utf8")
+
     if request.method == 'POST':
         if 'jobix' in request.headers:
             jobix = int(request.headers['jobix'])
         else:
             abort(403, "jobix must be specified in header!")
 
+        g.isworking = True
         init_db_if_not_existing(jobix)
 
         ids = json.loads(zlib.decompress(request.data))
-        ## Create new DB entries:
-        #for ii in ids.keys():
-        #    #print(f"checking: jobix {jobix} and jobid {ii}")
-        #    #print("Does it exist?", Engine.query.filter_by(jobix=jobix, jobid=ii).first())
-        #    if not Engine.query.filter_by(jobix=jobix, jobid=ii).first():
-        #        # This job does not exist:
-        #        entry = Engine(
-        #                jobix=jobix,
-        #                jobid=ii,
-        #                jobcmd=ids[ii]['jobcmd'],
-        #                jobstage=ids[ii]['jobstage'],
-        #                datecommitted=datetime.datetime.now())
-        #        db.session.add(entry)
-        #        db.session.commit()
+
         # Insert into pmdb
         # assume one or all arrive simultaneously,
         # but they must be in a list
@@ -242,7 +233,14 @@ def set_jobs():
         #jobpath = ids['jobpath'] if 'jobpath' in ids else None
         #jobtagged = ids['jobtagged'] if 'jobtagged' in ids else None
 
+        old_njobs = get_job_len(jobix) 
+
         jobid = ids['jobid']
+        if 'n_max' in ids:
+            n_max = int(ids['n_max'])
+            print(f"Will add jobs until id {n_max}")
+        else:
+            n_max = len(jobid)
         job = [json.dumps(j).encode('utf8') for j in ids['job']]
         if 'jobstage' in ids:
             jobstage = [int(j) for j in ids['jobstage']]
@@ -264,7 +262,7 @@ def set_jobs():
 
         status = pmdb.insert(
                 path_in = db_file_.format(jobix=jobix),
-                n_max = len(ids['jobid']),
+                n_max = n_max,
                 jobid = jobid,
                 job = job,
                 jobstage = jobstage,
@@ -283,6 +281,7 @@ def set_jobs():
         #bcast_reload()
         #bcast_jobstage_counter()
 
+        g.isworking = False
         print("post accepted!")
         return f"Accepted to {jobix}!"
     else:
@@ -302,82 +301,87 @@ def update_job(jobid=None, jobstage=None):
     else:
         abort(403, "jobix must be specified in header!")
 
-    init_db_if_not_existing(jobix)
+    init()
+    if not g.isworking:
+        init_db_if_not_existing(jobix)
 
-    #print("Updated DB")
+        #print("Updated DB")
 
-    job = None
-    filename =  None
-    jobtime = f"{datetime.datetime.now().strftime(dateformat)}".encode("utf8")
-    jobtagged = -1
+        job = None
+        filename =  None
+        jobtime = f"{datetime.datetime.now().strftime(dateformat)}".encode("utf8")
+        jobtagged = -1
 
-    if request.method == 'POST':
-        # We could receive both a save path and a new unpickleable job command
-        # that the worker for the next step can use for its
-        # analysis
-        req = json.loads(zlib.decompress(request.data))
-        if 'filename' in req:
-            filename = req['filename'].encode("utf8")
-            fn_screen = filename.decode('utf8')
+        if request.method == 'POST':
+            # We could receive both a save path and a new unpickleable job command
+            # that the worker for the next step can use for its
+            # analysis
+            req = json.loads(zlib.decompress(request.data))
+            if 'filename' in req:
+                filename = req['filename'].encode("utf8")
+                fn_screen = filename.decode('utf8')
+            else:
+                filename = None
+            if 'jobcmd' in req:
+                jobcmd = req['jobcmd']
+            else:
+                jobcmd = None
+
+            jobtagged = 0
+
+            #print(f"req_fname {req_fname} and filename {filename}")
         else:
+            # Not neccessarily so that a job updates filename/job command
             filename = None
-        if 'jobcmd' in req:
-            jobcmd = req['jobcmd']
-        else:
             jobcmd = None
+            #print(f"No filename/command")
 
-        jobtagged = 0
 
-        #print(f"req_fname {req_fname} and filename {filename}")
+        ## Alter the corresponding job:
+        njobs = get_job_len(jobix) 
+        print(f"SPECIFYING JOBID= {jobid}")
+        out = pmdb.set(db_file_.format(jobix=jobix), njobs,
+                jobid=jobid,
+                job=jobcmd,
+                jobstage=jobstage,
+                jobpath=filename,
+                jobdatecommitted=jobtime,
+                jobtagged=jobtagged)
+
+        print(f"Altered job, with response from pmdb: {out}")
+
+        #job = Engine.query.filter_by(jobix=jobix, jobid=jobid).first()
+        #print(f"Found job {job}")
+        #if job:
+        #    job.jobstage = jobstage
+        #    job.filename = filename or job.filename
+        #    job.jobcmd = jobcmd or job.jobcmd
+        #    job.datecommitted=datetime.datetime.now()
+        #    job.flagged = 0
+
+        #    #print(f"Committing changes to job {job}")
+
+        #    # Update entry
+        #    db.session.commit()
+
+        #    #print(f"Committed change!")
+
+        #    #print(f"Broadcasting change!")
+
+        #    # Broadcast changes to webpage conncetions
+        bcast_change_job(jobid,
+                {'jobstage': jobstage,
+                 'filename': fn_screen,
+                 'datecommitted': jobtime.decode("utf8"),
+                 'flagged': jobtagged})
+        bcast_jobstage_counter()
+
+            #print(f"Done with broadcasting!")
+
+        return f"Success, job {jobid} was updated to stage {jobstage}!"
+
     else:
-        # Not neccessarily so that a job updates filename/job command
-        filename = None
-        jobcmd = None
-        #print(f"No filename/command")
-
-
-    ## Alter the corresponding job:
-    njobs = get_job_len(jobix) 
-    print(f"SPECIFYING JOBID= {jobid}")
-    out = pmdb.set(db_file_.format(jobix=jobix), njobs,
-            jobid=jobid,
-            job=jobcmd,
-            jobstage=jobstage,
-            jobpath=filename,
-            jobdatecommitted=jobtime,
-            jobtagged=jobtagged)
-
-    print(f"Altered job, with response from pmdb: {out}")
-
-    #job = Engine.query.filter_by(jobix=jobix, jobid=jobid).first()
-    #print(f"Found job {job}")
-    #if job:
-    #    job.jobstage = jobstage
-    #    job.filename = filename or job.filename
-    #    job.jobcmd = jobcmd or job.jobcmd
-    #    job.datecommitted=datetime.datetime.now()
-    #    job.flagged = 0
-
-    #    #print(f"Committing changes to job {job}")
-
-    #    # Update entry
-    #    db.session.commit()
-
-    #    #print(f"Committed change!")
-
-    #    #print(f"Broadcasting change!")
-
-    #    # Broadcast changes to webpage conncetions
-    bcast_change_job(jobid,
-            {'jobstage': jobstage,
-             'filename': fn_screen,
-             'datecommitted': jobtime.decode("utf8"),
-             'flagged': jobtagged})
-    bcast_jobstage_counter()
-
-        #print(f"Done with broadcasting!")
-
-    return f"Success, job {jobid} was updated to stage {jobstage}!"
+        return json.dumps("busy").encode("utf8")
 
 
 
@@ -392,6 +396,11 @@ def check_stages(old_bad_stage=None, new_redo_stage=None):
     """ Checks and moves jobs to a lower stage if they are stuck (past lifetime)
         reads jobix from encrypted header
     """
+    init()
+
+    if g.isworking:
+        return json.dumps("busy").encode("utf8")
+
     if 'jobix' in request.headers:
         jobix = int(request.headers['jobix'])
 
@@ -468,10 +477,12 @@ def check_stages(old_bad_stage=None, new_redo_stage=None):
 def get_jobs(jobstage=None, nextstage=None):
     """ Returns first available job in `jobstage`
     """
-    try:
-        g.njobs
-    except AttributeError:
-        g.njobs = count_jobs()
+    init()
+
+    if g.isworking:
+        return json.dumps("busy").encode("utf8")
+
+    g.njobs = count_jobs()
 
 
     if jobstage is not None:
@@ -489,7 +500,7 @@ def get_jobs(jobstage=None, nextstage=None):
         #job = Engine.query.filter_by(jobstage=jobstage).first()
         job = pmdb.search(db, n_jobs, jobstage=('==',jobstage), only_first=True)
         # Make it unavailable for other searches right away
-        #print(job, "WAS FOUND")
+        print(job, "WAS FOUND searching amonb n_jobs:", n_jobs, "for", jobstage)
         if len(job) > 0:
             #print(f"SETTING VALUE (TAKEN) out of {n_jobs}, jobid {job[0]}, jobstage {int(jobstage+1)}")
             pmdb.set(db,
@@ -508,7 +519,7 @@ def get_jobs(jobstage=None, nextstage=None):
             # Goes to worker:
             print("RETURNS VALUES (TO WORKER) ")
             res = json.dumps({'jobid': info[0],
-                              'jobcmd': info[1].decode('utf8'),
+                              'job': info[1].decode('utf8'),
                               'jobstage': info[2],
                               'jobix': jobix}).encode("utf8")
 
@@ -630,6 +641,10 @@ def set_lifetime(jobstage=None, n_minutes=None):
     """ Sets the lifetime a job can have in a jobstage
     """
 
+    init()
+
+    if g.isworking:
+        return json.dumps("busy").encode("utf8")
 
     if jobstage and n_minutes:
         # Set a lifetime
@@ -689,6 +704,7 @@ def count_jobs(jobstage=-1):
     #print("IN COUNT_JOBS")
 
     # ask db:
+
     njobs = 0
     if len(glob.glob("*.pmem")) > 0:
         jobix_ = int(glob.glob(db_file_.replace("{jobix}","*"))[0].split("_")[1].split(".")[0])
